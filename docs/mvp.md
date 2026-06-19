@@ -6,6 +6,9 @@ Build the smallest Wutai version that proves a non-programmer can start a
 desktop-grade task, grant scoped permissions, observe progress, and receive a
 durable artifact without seeing developer-facing agent complexity.
 
+The implementation source of truth for the first release is
+[Wutai v0.1 PRD](prd/wutai-v0.1.md).
+
 ## Candidate MVP Workflow
 
 Deep research is the recommended first workflow because it tests task planning,

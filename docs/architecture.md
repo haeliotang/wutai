@@ -6,6 +6,10 @@ Wutai should own the product shell, task model, permission broker, artifact
 model, and adapter contract. It should reuse open-source runtimes for actual
 agent execution wherever possible.
 
+For the first implementation boundary, see
+[Wutai v0.1 PRD](prd/wutai-v0.1.md) and the
+[v0.1 adapter shortlist](research/adapter-shortlist-v0.1.md).
+
 ```text
 Desktop UI Shell
   -> Persona and Voice Layer

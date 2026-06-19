@@ -74,6 +74,7 @@ See:
 - [Architecture](docs/architecture.md)
 - [Security Model](docs/security-model.md)
 - [Persona and Voice](docs/persona-and-voice.md)
+- [Wutai v0.1 PRD](docs/prd/wutai-v0.1.md)
 - [Market Scan](docs/research/market-scan.md)
 
 ## Repository Status
