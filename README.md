@@ -85,7 +85,8 @@ Prerequisites:
 - Node.js
 - npm
 - Rust and Cargo
-- Python 3.11 or 3.12 for the optional GPT Researcher sidecar
+- Python 3.11 through 3.13 for the optional GPT Researcher sidecar; 3.13 is
+  recommended
 
 Install dependencies:
 
@@ -108,11 +109,20 @@ npm run tauri dev
 Run the Tauri shell with the optional GPT Researcher sidecar:
 
 ```bash
-python3.11 -m venv .venv
+python3.13 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-gpt-researcher.txt
-export WUTAI_GPT_RESEARCHER_PYTHON="$PWD/.venv/bin/python"
 VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher npm run tauri dev
+```
+
+Wutai automatically prefers the project `.venv`. Set
+`WUTAI_GPT_RESEARCHER_PYTHON` only to override that interpreter.
+
+Verify the installed sidecar without API keys or network research:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml \
+  installed_gpt_researcher_sidecar_smoke -- --ignored
 ```
 
 Then open Research setup in the app and save the model access key and web search

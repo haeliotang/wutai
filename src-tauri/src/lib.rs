@@ -386,7 +386,53 @@ fn gpt_researcher_python_candidates() -> Vec<String> {
         return vec![python_path];
     }
 
-    vec!["python3".to_string(), "python".to_string()]
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let current_dir = std::env::current_dir().ok();
+    let mut roots = vec![manifest_dir.join("..")];
+    if let Some(current_dir) = current_dir {
+        roots.push(current_dir.clone());
+        if let Some(parent) = current_dir.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    for root in roots {
+        for relative_path in [".venv/bin/python", ".venv/Scripts/python.exe"] {
+            let path = root.join(relative_path);
+            if path.exists() {
+                let candidate = path.to_string_lossy().to_string();
+                if seen.insert(candidate.clone()) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+    }
+
+    for candidate in [
+        "python3.13",
+        "python3.12",
+        "python3.11",
+        "python3",
+        "python",
+    ] {
+        if seen.insert(candidate.to_string()) {
+            candidates.push(candidate.to_string());
+        }
+    }
+    candidates
+}
+
+fn supported_python_version(version_output: &str) -> bool {
+    let version = version_output
+        .split_once('|')
+        .map(|(_, version)| version)
+        .unwrap_or(version_output);
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|value| value.parse::<u32>().ok());
+    let minor = parts.next().and_then(|value| value.parse::<u32>().ok());
+    matches!((major, minor), (Some(3), Some(11..=13)))
 }
 
 fn command_text_output(command: &mut Command) -> Result<String, String> {
@@ -412,7 +458,16 @@ fn find_working_python() -> Result<(String, String), Vec<String>> {
         ));
 
         match output {
-            Ok(output) => return Ok((python_path, output)),
+            Ok(output) if supported_python_version(&output) => return Ok((python_path, output)),
+            Ok(output) => {
+                let version = output
+                    .split_once('|')
+                    .map(|(_, version)| version)
+                    .unwrap_or("unknown");
+                errors.push(format!(
+                    "{python_path}: Python {version} is unsupported; use Python 3.11 through 3.13."
+                ));
+            }
             Err(error) => errors.push(format!("{python_path}: {error}")),
         }
     }
@@ -665,7 +720,7 @@ fn check_gpt_researcher(provider: State<'_, ResearchProviderState>) -> ResearchP
                 Some(errors.join("\n")),
             ));
             fixes.push(
-                "Install Python 3.11 or 3.12, then set WUTAI_GPT_RESEARCHER_PYTHON to that Python path.".to_string(),
+                "Install Python 3.13 and create the project .venv, or set WUTAI_GPT_RESEARCHER_PYTHON to a Python 3.11 through 3.13 interpreter.".to_string(),
             );
         }
     }
@@ -1091,6 +1146,39 @@ mod tests {
             .unwrap_err(),
             "keychain unavailable"
         );
+    }
+
+    #[test]
+    fn python_support_range_is_limited_to_3_11_through_3_13() {
+        for version in ["3.11.9", "3.12.12", "3.13.14"] {
+            assert!(supported_python_version(version));
+            assert!(supported_python_version(&format!(
+                "/path/to/python|{version}"
+            )));
+        }
+        for version in ["3.10.18", "3.14.0", "4.0.0", "unknown"] {
+            assert!(!supported_python_version(version));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires the optional GPT Researcher Python environment"]
+    fn installed_gpt_researcher_sidecar_smoke() {
+        let (python_path, version_output) = find_working_python().unwrap_or_else(|errors| {
+            panic!("No supported sidecar Python found:\n{}", errors.join("\n"))
+        });
+        assert!(supported_python_version(&version_output));
+        assert_eq!(
+            python_package_version(&python_path, "gpt-researcher").unwrap(),
+            "0.15.1"
+        );
+        let imported = command_text_output(
+            Command::new(&python_path)
+                .arg("-c")
+                .arg("from gpt_researcher import GPTResearcher; print(GPTResearcher.__name__)"),
+        )
+        .unwrap();
+        assert_eq!(imported, "GPTResearcher");
     }
 
     #[test]

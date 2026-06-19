@@ -97,7 +97,7 @@ async def _run(task_id: str, query: str, report_type: str, tone: str) -> dict[st
     except ImportError as error:
         raise RuntimeError(
             "Missing Python package `gpt-researcher`. Install optional sidecar "
-            "dependencies with `python3.11 -m pip install -r requirements-gpt-researcher.txt`."
+            "dependencies with `python3.13 -m pip install -r requirements-gpt-researcher.txt`."
         ) from error
 
     researcher = GPTResearcher(query=query, report_type=report_type, tone=tone)
