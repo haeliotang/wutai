@@ -85,6 +85,11 @@ h2 {
   line-height: 1.6;
 }
 
+.hero-console .runtime-line {
+  color: #95e884;
+  font-size: 13px;
+}
+
 .system-line {
   color: #95e884;
   font-size: 13px;

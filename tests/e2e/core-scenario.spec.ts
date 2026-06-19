@@ -16,4 +16,5 @@ test("runs the v0.1 mock research task lifecycle", async ({ page }) => {
   await expect(page.getByText("Research task completed.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Artifact preview" })).toBeVisible();
   await expect(page.getByText("Wutai v0.1 Mock Research Report")).toBeVisible();
+  await expect(page.getByText("Saved report.md, sources.json, and audit.json")).toBeVisible();
 });

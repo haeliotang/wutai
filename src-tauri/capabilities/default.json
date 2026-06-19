@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for the Wutai v0.1 shell.",
+  "windows": ["main"],
+  "permissions": ["core:default", "sql:default", "sql:allow-execute"]
+}

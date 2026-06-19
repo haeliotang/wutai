@@ -110,6 +110,12 @@ Build the frontend:
 npm run build
 ```
 
+Run the core scenario e2e test:
+
+```bash
+npm run test:e2e
+```
+
 ## Repository Status
 
 This repository is in product-definition stage. The current documents define

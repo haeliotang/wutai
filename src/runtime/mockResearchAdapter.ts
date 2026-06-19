@@ -4,6 +4,7 @@ import {
   type SourceRecord,
   type WutaiTask,
 } from "../domain/task";
+import type { ArtifactWriter } from "../artifacts/artifactWriter";
 
 const sources: Array<Omit<SourceRecord, "sourceId" | "taskId">> = [
   {
@@ -60,8 +61,8 @@ model, and a GPT Researcher adapter that emits Wutai task events.
 
 - Desktop shell: Tauri.
 - UI: React and TypeScript.
-- Local task state: SQLite in the real adapter path; localStorage only in this
-  scaffold.
+- Local task state: SQLite through the Tauri SQL plugin, with localStorage only
+  for browser preview and test runs.
 - Research runtime: GPT Researcher.
 - Future adapters: browser-use, Codex app-server, CUA, and Agent-S.
 
@@ -80,7 +81,8 @@ ${sources.map((source) => `- [${source.title}](${source.url})`).join("\n")}
 export async function runMockResearchAdapter(
   initialTask: WutaiTask,
   signal: AbortSignal,
-  onUpdate: (task: WutaiTask) => void,
+  onUpdate: (task: WutaiTask) => void | Promise<void>,
+  artifactWriter: ArtifactWriter,
 ) {
   let task: WutaiTask = {
     ...initialTask,
@@ -103,7 +105,7 @@ export async function runMockResearchAdapter(
       summary,
       visibility: "user",
     });
-    onUpdate(task);
+    await onUpdate(task);
   }
 
   const sourceRecords = sources.map((source, index) => ({
@@ -133,6 +135,26 @@ export async function runMockResearchAdapter(
       content: JSON.stringify(sourceRecords, null, 2),
       createdAt,
     },
+    {
+      artifactId: `${task.taskId}_artifact_audit`,
+      taskId: task.taskId,
+      type: "json",
+      name: "audit.json",
+      virtualPath: `artifacts/${task.taskId}/audit.json`,
+      content: JSON.stringify(
+        {
+          taskId: task.taskId,
+          userRequest: task.userRequest,
+          permissions: task.permissions,
+          events: task.events,
+          generatedAt: createdAt,
+          adapter: "mockResearchAdapter",
+        },
+        null,
+        2,
+      ),
+      createdAt,
+    },
   ];
 
   task = {
@@ -143,11 +165,15 @@ export async function runMockResearchAdapter(
     updatedAt: createdAt,
   };
 
+  task = await artifactWriter.write(task);
+
   task = appendEvent(task, {
     type: "ArtifactCreated",
-    summary: "Saved report.md and sources.json as task artifacts.",
+    summary: "Saved report.md, sources.json, and audit.json as task artifacts.",
     details:
-      "This scaffold stores artifacts in local browser state. The next storage milestone replaces this with SQLite-backed local files.",
+      artifactWriter.backendName === "Tauri app-data files"
+        ? "Artifacts were written to the local Tauri app-data directory."
+        : "Artifacts are available in browser preview mode. Tauri writes them to local app-data files.",
     visibility: "user",
   });
 
@@ -157,6 +183,6 @@ export async function runMockResearchAdapter(
     visibility: "user",
   });
 
-  onUpdate(task);
+  await onUpdate(task);
   return task;
 }

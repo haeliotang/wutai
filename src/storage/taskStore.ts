@@ -1,6 +1,7 @@
 import type { WutaiTask } from "../domain/task";
 
 export interface TaskStore {
+  readonly backendName: string;
   list(): Promise<WutaiTask[]>;
   save(task: WutaiTask): Promise<void>;
   clear(): Promise<void>;
@@ -24,6 +25,8 @@ function writeTasks(tasks: WutaiTask[]) {
 }
 
 export const localTaskStore: TaskStore = {
+  backendName: "localStorage fallback",
+
   async list() {
     return readTasks().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   },

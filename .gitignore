@@ -40,6 +40,6 @@ Thumbs.db
 
 # Wutai local state
 .wutai/
-artifacts/
+/artifacts/
 tmp/
 src-tauri/gen/

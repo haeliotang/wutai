@@ -12,7 +12,7 @@ contract.
 | --- | --- | --- | --- |
 | Desktop shell | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) | Apache-2.0 | Mature desktop shell with Rust backend and web frontend. |
 | UI | [facebook/react](https://github.com/facebook/react) | MIT | Mature UI library and ecosystem. |
-| Local storage | [SQLite](https://github.com/sqlite/sqlite) | Public domain style upstream project | Local durable storage for task, event, permission, and artifact metadata. |
+| Local storage | [SQLite](https://github.com/sqlite/sqlite) through [tauri-plugin-sql](https://github.com/tauri-apps/plugins-workspace/tree/v2/plugins/sql) | SQLite upstream uses public domain style terms; Tauri SQL plugin uses MIT or MIT/Apache-2.0 terms | Local durable storage for task, event, permission, and artifact metadata without rebuilding database infrastructure. |
 | Deep research runtime | [assafelovic/gpt-researcher](https://github.com/assafelovic/gpt-researcher) | Apache-2.0 | Mature open-source deep research agent that maps directly to the v0.1 core scenario. |
 
 ## Hold for v0.2+

@@ -26,5 +26,10 @@
   "bundle": {
     "active": false,
     "targets": "all"
+  },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:wutai.db"]
+    }
   }
 }

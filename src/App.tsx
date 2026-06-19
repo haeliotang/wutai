@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createArtifactWriter, type ArtifactWriter } from "./artifacts/artifactWriter";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
 import { runMockResearchAdapter } from "./runtime/mockResearchAdapter";
-import { localTaskStore } from "./storage/taskStore";
+import { createTaskStore } from "./storage/createTaskStore";
+import type { TaskStore } from "./storage/taskStore";
 
 const CORE_SCENARIO =
   "Research open-source personal computer agent projects and produce a short market comparison report.";
@@ -29,13 +31,32 @@ export default function App() {
   const [activeTask, setActiveTask] = useState<WutaiTask | null>(null);
   const [request, setRequest] = useState(CORE_SCENARIO);
   const [error, setError] = useState<string | null>(null);
+  const [taskStore, setTaskStore] = useState<TaskStore | null>(null);
+  const [artifactWriter, setArtifactWriter] = useState<ArtifactWriter | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    localTaskStore.list().then((items) => {
+    let active = true;
+
+    async function bootstrap() {
+      const store = await createTaskStore();
+      const writer = createArtifactWriter();
+      const items = await store.list();
+      if (!active) return;
+      setTaskStore(store);
+      setArtifactWriter(writer);
       setTasks(items);
       setActiveTask(items[0] ?? null);
+    }
+
+    bootstrap().catch((error) => {
+      console.error(error);
+      setError("Wutai failed to initialize local storage.");
     });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const pendingPermission = activeTask?.permissions.find(
@@ -50,13 +71,20 @@ export default function App() {
   );
 
   async function persist(task: WutaiTask) {
-    await localTaskStore.save(task);
-    const nextTasks = await localTaskStore.list();
+    if (!taskStore) return;
+
+    await taskStore.save(task);
+    const nextTasks = await taskStore.list();
     setTasks(nextTasks);
     setActiveTask(task);
   }
 
   async function startTask() {
+    if (!taskStore || !artifactWriter) {
+      setError("Wutai is still initializing local storage.");
+      return;
+    }
+
     if (!request.trim()) {
       setError("Enter a task before starting.");
       return;
@@ -94,10 +122,17 @@ export default function App() {
     await persist(nextTask);
 
     if (status === "approved") {
+      if (!artifactWriter) return;
+
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        await runMockResearchAdapter(nextTask, controller.signal, persist);
+        await runMockResearchAdapter(
+          nextTask,
+          controller.signal,
+          persist,
+          artifactWriter,
+        );
       } catch (error) {
         const failedTask = appendEvent(
           { ...nextTask, status: "cancelled", updatedAt: new Date().toISOString() },
@@ -122,7 +157,9 @@ export default function App() {
   }
 
   async function clearHistory() {
-    await localTaskStore.clear();
+    if (!taskStore) return;
+
+    await taskStore.clear();
     setTasks([]);
     setActiveTask(null);
   }
@@ -135,6 +172,10 @@ export default function App() {
         <p>
           v0.1 scaffold. Natural-language task entry, task-scoped permission,
           mock research progress, and local artifact preview.
+        </p>
+        <p className="runtime-line">
+          Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
+          {artifactWriter?.backendName ?? "initializing"}
         </p>
       </section>
 
