@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
     "test:e2e": "playwright test",
+    "test:e2e:providers": "VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher playwright test tests/e2e/provider-profiles.spec.ts",
     "tauri": "tauri"
   },
   "dependencies": {

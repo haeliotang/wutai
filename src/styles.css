@@ -23,6 +23,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -190,7 +191,8 @@ textarea {
   line-height: 1.5;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 38px;
   border: 1px solid #34392f;
@@ -201,7 +203,8 @@ input {
   background: #080908;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #91c789;
 }
 
@@ -403,6 +406,42 @@ input:focus {
   font-size: 13px;
 }
 
+.profile-toolbar {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+  border-bottom: 1px solid #20241e;
+  padding-bottom: 14px;
+}
+
+.profile-toolbar button {
+  padding: 0 14px;
+}
+
+.provider-advanced {
+  grid-column: 1 / -1;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  background: #070807;
+}
+
+.provider-advanced summary {
+  padding: 11px 12px;
+  color: #d6e8c6;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.provider-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #20241e;
+  padding: 12px;
+}
+
 .provider-setup-actions {
   display: flex;
   flex-wrap: wrap;
@@ -486,8 +525,17 @@ input:focus {
 
   .status-grid,
   .permission-box,
-  .provider-setup-form {
+  .provider-setup-form,
+  .provider-advanced-grid {
     grid-template-columns: 1fr;
+  }
+
+  .profile-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .profile-toolbar label {
+    grid-column: 1 / -1;
   }
 
   .permission-actions {

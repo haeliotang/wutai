@@ -238,6 +238,7 @@ contracts.
 | UI | React + TypeScript | Mature UI ecosystem and fast iteration. |
 | Local storage | SQLite via Tauri SQL plugin | Local, durable task and audit storage without rebuilding database infrastructure. |
 | Credential storage | System keychain via keyring-rs | Saves provider access keys without building a custom secret store. |
+| Provider configuration | Wutai Provider Profiles | Keeps model, search, and embedding choices independent while hiding endpoint details from the default flow. |
 | Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
@@ -353,6 +354,10 @@ The v0.1 core scenario is complete when:
     provider setup.
 14. No v0.1 flow performs file modification, desktop control, email sending, or
     form submission.
+15. A real-research user can save, switch, and delete Provider Profiles without
+    storing API keys in the profile metadata file.
+16. Model, search, and embedding providers can be changed independently, while
+    Base URL and embedding controls remain under Advanced settings.
 
 ## 10. Implementation Milestones
 
@@ -377,6 +382,8 @@ The v0.1 core scenario is complete when:
 - Event translation.
 - Markdown report artifact.
 - Source and audit files.
+- Provider Profiles for DeepSeek, OpenAI, OpenAI-compatible endpoints, and
+  Ollama-backed local models.
 
 ### Milestone 4: Core Scenario QA
 
@@ -415,6 +422,4 @@ Later candidates:
   or an adapter service?
 - Should generated artifacts live in the repo-style `artifacts/` folder or an
   OS app-data directory by default?
-- Which LLM provider is the initial default for research tasks?
-- Should v0.1 support only API-key auth, or also local model providers?
 - What is the minimum acceptable source-quality filter for generated reports?

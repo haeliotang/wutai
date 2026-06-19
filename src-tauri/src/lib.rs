@@ -4,6 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     io::{BufRead, BufReader, Read},
+    net::{TcpStream, ToSocketAddrs},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -14,8 +15,7 @@ use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 const KEYRING_SERVICE: &str = "com.haeliotang.wutai.research";
-const OPENAI_KEY_ACCOUNT: &str = "openai_api_key";
-const TAVILY_KEY_ACCOUNT: &str = "tavily_api_key";
+const PROFILE_CONFIG_FILE: &str = "research-provider-profiles.json";
 
 #[derive(Debug, Deserialize)]
 struct ArtifactPayload {
@@ -86,19 +86,78 @@ struct ResearchPreflight {
     package_version: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResearchProviderProfile {
+    profile_id: String,
+    name: String,
+    model_provider: String,
+    model: String,
+    model_base_url: Option<String>,
+    search_provider: String,
+    embedding_provider: String,
+    embedding_model: String,
+    embedding_base_url: Option<String>,
+}
+
+impl Default for ResearchProviderProfile {
+    fn default() -> Self {
+        Self {
+            profile_id: "deepseek-local".to_string(),
+            name: "DeepSeek + local memory".to_string(),
+            model_provider: "deepseek".to_string(),
+            model: "deepseek-v4-flash".to_string(),
+            model_base_url: None,
+            search_provider: "tavily".to_string(),
+            embedding_provider: "ollama".to_string(),
+            embedding_model: "nomic-embed-text".to_string(),
+            embedding_base_url: Some("http://127.0.0.1:11434".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResearchProviderProfiles {
+    active_profile_id: String,
+    profiles: Vec<ResearchProviderProfile>,
+}
+
+impl Default for ResearchProviderProfiles {
+    fn default() -> Self {
+        let profile = ResearchProviderProfile::default();
+        Self {
+            active_profile_id: profile.profile_id.clone(),
+            profiles: vec![profile],
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResearchProviderSetupInput {
-    openai_api_key: Option<String>,
-    tavily_api_key: Option<String>,
+    profile: ResearchProviderProfile,
+    model_api_key: Option<String>,
+    search_api_key: Option<String>,
+    embedding_api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ResearchProviderSetup {
-    openai_key_configured: bool,
-    tavily_key_configured: bool,
+    profiles: ResearchProviderProfiles,
+    active_profile: ResearchProviderProfile,
+    model_key_configured: bool,
+    search_key_configured: bool,
+    embedding_key_configured: bool,
     secret_store: String,
+}
+
+#[derive(Debug)]
+struct RuntimeProviderConfig {
+    environment: HashMap<String, String>,
+    sensitive_values: Vec<String>,
+    profile: ResearchProviderProfile,
 }
 
 #[derive(Default)]
@@ -118,6 +177,8 @@ struct SystemKeyringStore;
 struct ResearchProviderState {
     store: Arc<dyn ProviderSecretStore>,
     environment_keys: HashMap<String, String>,
+    profiles: Mutex<ResearchProviderProfiles>,
+    profile_path: Mutex<Option<PathBuf>>,
 }
 
 impl ResearchProviderState {
@@ -125,7 +186,63 @@ impl ResearchProviderState {
         Self {
             store,
             environment_keys,
+            profiles: Mutex::new(ResearchProviderProfiles::default()),
+            profile_path: Mutex::new(None),
         }
+    }
+
+    fn initialize_profiles(&self, path: PathBuf) -> Result<(), String> {
+        let profiles = if path.exists() {
+            let content = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+            serde_json::from_str(&content).map_err(|error| error.to_string())?
+        } else {
+            ResearchProviderProfiles::default()
+        };
+        validate_profiles(&profiles)?;
+        *self.profiles.lock().map_err(|error| error.to_string())? = profiles;
+        *self
+            .profile_path
+            .lock()
+            .map_err(|error| error.to_string())? = Some(path);
+        Ok(())
+    }
+
+    fn profiles(&self) -> Result<ResearchProviderProfiles, String> {
+        Ok(self
+            .profiles
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone())
+    }
+
+    fn save_profiles(&self, profiles: ResearchProviderProfiles) -> Result<(), String> {
+        validate_profiles(&profiles)?;
+        if let Some(path) = self
+            .profile_path
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clone()
+        {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let content =
+                serde_json::to_string_pretty(&profiles).map_err(|error| error.to_string())?;
+            let temporary_path = path.with_extension("json.tmp");
+            fs::write(&temporary_path, content).map_err(|error| error.to_string())?;
+            fs::rename(&temporary_path, &path).map_err(|error| error.to_string())?;
+        }
+        *self.profiles.lock().map_err(|error| error.to_string())? = profiles;
+        Ok(())
+    }
+
+    fn active_profile(&self) -> Result<ResearchProviderProfile, String> {
+        let profiles = self.profiles()?;
+        profiles
+            .profiles
+            .into_iter()
+            .find(|profile| profile.profile_id == profiles.active_profile_id)
+            .ok_or_else(|| "The active research provider profile does not exist.".to_string())
     }
 
     fn configured_key(&self, account: &str, env_name: &str) -> Result<Option<String>, String> {
@@ -149,7 +266,7 @@ impl ResearchProviderState {
 
 impl Default for ResearchProviderState {
     fn default() -> Self {
-        let environment_keys = ["OPENAI_API_KEY", "TAVILY_API_KEY"]
+        let environment_keys = ["DEEPSEEK_API_KEY", "OPENAI_API_KEY", "TAVILY_API_KEY"]
             .into_iter()
             .filter_map(|name| {
                 normalize_secret(std::env::var(name).ok()).map(|value| (name.to_string(), value))
@@ -280,6 +397,277 @@ fn normalize_secret(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn provider_secret_account(profile_id: &str, purpose: &str) -> String {
+    format!("profile:{}:{purpose}", sanitize_path_segment(profile_id))
+}
+
+fn required_text(value: &str, label: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        Err(format!("{label} cannot be empty."))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_base_url(value: &Option<String>, label: &str, required: bool) -> Result<(), String> {
+    let value = value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if required && value.is_none() {
+        return Err(format!("{label} is required."));
+    }
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let parsed = url::Url::parse(value).map_err(|_| format!("{label} must be a valid URL."))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(format!("{label} must use HTTP or HTTPS."));
+    }
+    Ok(())
+}
+
+fn validate_profile(profile: &ResearchProviderProfile) -> Result<(), String> {
+    required_text(&profile.profile_id, "Profile ID")?;
+    required_text(&profile.name, "Profile name")?;
+    required_text(&profile.model, "Model")?;
+    required_text(&profile.embedding_model, "Embedding model")?;
+    if profile.profile_id.len() > 64
+        || !profile.profile_id.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || character == '-'
+                || character == '_'
+                || character == '.'
+        })
+    {
+        return Err(
+            "Profile ID must be at most 64 characters and use letters, numbers, '-', '_' or '.'."
+                .to_string(),
+        );
+    }
+    if profile.name.len() > 80 {
+        return Err("Profile name must be at most 80 characters.".to_string());
+    }
+    if !matches!(
+        profile.model_provider.as_str(),
+        "deepseek" | "openai" | "openai-compatible" | "ollama"
+    ) {
+        return Err("Unsupported model provider.".to_string());
+    }
+    if !matches!(profile.search_provider.as_str(), "tavily" | "duckduckgo") {
+        return Err("Unsupported search provider.".to_string());
+    }
+    if !matches!(profile.embedding_provider.as_str(), "openai" | "ollama") {
+        return Err("Unsupported embedding provider.".to_string());
+    }
+    validate_base_url(
+        &profile.model_base_url,
+        "Model base URL",
+        matches!(
+            profile.model_provider.as_str(),
+            "openai-compatible" | "ollama"
+        ),
+    )?;
+    validate_base_url(
+        &profile.embedding_base_url,
+        "Embedding base URL",
+        profile.embedding_provider == "ollama",
+    )?;
+    if profile.model_provider == "ollama"
+        && profile.embedding_provider == "ollama"
+        && profile.model_base_url.as_deref().map(str::trim)
+            != profile.embedding_base_url.as_deref().map(str::trim)
+    {
+        return Err(
+            "GPT Researcher requires the model and embedding Ollama services to use the same base URL."
+                .to_string(),
+        );
+    }
+    if matches!(
+        profile.model_provider.as_str(),
+        "openai" | "openai-compatible"
+    ) && profile.embedding_provider == "openai"
+        && profile.model_base_url.as_deref().map(str::trim)
+            != profile.embedding_base_url.as_deref().map(str::trim)
+        && profile.embedding_base_url.is_some()
+    {
+        return Err(
+            "GPT Researcher requires OpenAI model and embedding requests to use the same base URL."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_profiles(profiles: &ResearchProviderProfiles) -> Result<(), String> {
+    if profiles.profiles.is_empty() {
+        return Err("At least one research provider profile is required.".to_string());
+    }
+    let mut ids = HashSet::new();
+    for profile in &profiles.profiles {
+        validate_profile(profile)?;
+        if !ids.insert(profile.profile_id.as_str()) {
+            return Err("Research provider profile IDs must be unique.".to_string());
+        }
+    }
+    if !ids.contains(profiles.active_profile_id.as_str()) {
+        return Err("The active research provider profile does not exist.".to_string());
+    }
+    Ok(())
+}
+
+fn model_key_source(profile: &ResearchProviderProfile) -> Option<(&'static str, &'static str)> {
+    match profile.model_provider.as_str() {
+        "deepseek" => Some(("model:deepseek", "DEEPSEEK_API_KEY")),
+        "openai" => Some(("model:openai", "OPENAI_API_KEY")),
+        "openai-compatible" => Some(("model:openai-compatible", "OPENAI_API_KEY")),
+        "ollama" => None,
+        _ => None,
+    }
+}
+
+fn search_key_source(profile: &ResearchProviderProfile) -> Option<(&'static str, &'static str)> {
+    match profile.search_provider.as_str() {
+        "tavily" => Some(("search:tavily", "TAVILY_API_KEY")),
+        "duckduckgo" => None,
+        _ => None,
+    }
+}
+
+fn embedding_key_source(profile: &ResearchProviderProfile) -> Option<(&'static str, &'static str)> {
+    if profile.embedding_provider != "openai" {
+        return None;
+    }
+    if matches!(
+        profile.model_provider.as_str(),
+        "openai" | "openai-compatible"
+    ) {
+        model_key_source(profile)
+    } else {
+        Some(("embedding:openai", "OPENAI_API_KEY"))
+    }
+}
+
+fn profile_secret_purposes() -> [&'static str; 8] {
+    [
+        "model:deepseek",
+        "model:openai",
+        "model:openai-compatible",
+        "search:tavily",
+        "embedding:openai",
+        "model",
+        "search",
+        "embedding",
+    ]
+}
+
+fn configured_profile_key(
+    provider: &ResearchProviderState,
+    profile: &ResearchProviderProfile,
+    source: Option<(&str, &str)>,
+) -> Result<Option<String>, String> {
+    let Some((purpose, environment_name)) = source else {
+        return Ok(None);
+    };
+    provider.configured_key(
+        &provider_secret_account(&profile.profile_id, purpose),
+        environment_name,
+    )
+}
+
+fn profile_key_configuration_source(
+    provider: &ResearchProviderState,
+    profile: &ResearchProviderProfile,
+    source: Option<(&str, &str)>,
+) -> Result<Option<&'static str>, String> {
+    let Some((purpose, environment_name)) = source else {
+        return Ok(Some("not required"));
+    };
+    provider.key_configuration_source(
+        &provider_secret_account(&profile.profile_id, purpose),
+        environment_name,
+    )
+}
+
+fn build_provider_runtime(
+    provider: &ResearchProviderState,
+) -> Result<RuntimeProviderConfig, String> {
+    let profile = provider.active_profile()?;
+    validate_profile(&profile)?;
+    let model_key = configured_profile_key(provider, &profile, model_key_source(&profile))?;
+    let search_key = configured_profile_key(provider, &profile, search_key_source(&profile))?;
+    let embedding_key = configured_profile_key(provider, &profile, embedding_key_source(&profile))?;
+    if model_key_source(&profile).is_some() && model_key.is_none() {
+        return Err("The active Provider Profile is missing model access.".to_string());
+    }
+    if search_key_source(&profile).is_some() && search_key.is_none() {
+        return Err("The active Provider Profile is missing web search access.".to_string());
+    }
+    if embedding_key_source(&profile).is_some() && embedding_key.is_none() {
+        return Err("The active Provider Profile is missing document memory access.".to_string());
+    }
+    let mut environment = HashMap::new();
+
+    let model_prefix = match profile.model_provider.as_str() {
+        "deepseek" => "deepseek",
+        "openai" | "openai-compatible" => "openai",
+        "ollama" => "ollama",
+        _ => return Err("Unsupported model provider.".to_string()),
+    };
+    let model = format!("{model_prefix}:{}", profile.model.trim());
+    for name in ["FAST_LLM", "SMART_LLM", "STRATEGIC_LLM"] {
+        environment.insert(name.to_string(), model.clone());
+    }
+    environment.insert("RETRIEVER".to_string(), profile.search_provider.clone());
+    environment.insert(
+        "EMBEDDING".to_string(),
+        format!(
+            "{}:{}",
+            profile.embedding_provider,
+            profile.embedding_model.trim()
+        ),
+    );
+
+    if let Some(key) = model_key.as_ref() {
+        let environment_name = model_key_source(&profile).unwrap().1;
+        environment.insert(environment_name.to_string(), key.clone());
+    }
+    if let Some(key) = search_key.as_ref() {
+        environment.insert("TAVILY_API_KEY".to_string(), key.clone());
+    }
+    if let Some(key) = embedding_key.as_ref() {
+        environment.insert("OPENAI_API_KEY".to_string(), key.clone());
+    }
+    if let Some(base_url) = profile.model_base_url.as_deref().map(str::trim) {
+        let name = if profile.model_provider == "ollama" {
+            "OLLAMA_BASE_URL"
+        } else {
+            "OPENAI_BASE_URL"
+        };
+        environment.insert(name.to_string(), base_url.to_string());
+    }
+    if let Some(base_url) = profile.embedding_base_url.as_deref().map(str::trim) {
+        let name = if profile.embedding_provider == "ollama" {
+            "OLLAMA_BASE_URL"
+        } else {
+            "OPENAI_BASE_URL"
+        };
+        environment.insert(name.to_string(), base_url.to_string());
+    }
+
+    let sensitive_values = [model_key, search_key, embedding_key]
+        .into_iter()
+        .flatten()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    Ok(RuntimeProviderConfig {
+        environment,
+        sensitive_values,
+        profile,
+    })
+}
+
 fn configured_key_from_sources(
     stored_key: Result<Option<String>, String>,
     environment_key: Option<String>,
@@ -323,13 +711,29 @@ fn key_configuration_source_from_sources(
 }
 
 fn provider_setup_state(provider: &ResearchProviderState) -> Result<ResearchProviderSetup, String> {
+    let profiles = provider.profiles()?;
+    let active_profile = provider.active_profile()?;
     Ok(ResearchProviderSetup {
-        openai_key_configured: provider
-            .configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?
-            .is_some(),
-        tavily_key_configured: provider
-            .configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?
-            .is_some(),
+        model_key_configured: configured_profile_key(
+            provider,
+            &active_profile,
+            model_key_source(&active_profile),
+        )?
+        .is_some(),
+        search_key_configured: configured_profile_key(
+            provider,
+            &active_profile,
+            search_key_source(&active_profile),
+        )?
+        .is_some(),
+        embedding_key_configured: configured_profile_key(
+            provider,
+            &active_profile,
+            embedding_key_source(&active_profile),
+        )?
+        .is_some(),
+        profiles,
+        active_profile,
         secret_store: "system keychain".to_string(),
     })
 }
@@ -646,12 +1050,89 @@ fn save_research_provider_setup(
     provider: State<'_, ResearchProviderState>,
     input: ResearchProviderSetupInput,
 ) -> Result<ResearchProviderSetup, String> {
-    provider
-        .store
-        .save(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
-    provider
-        .store
-        .save(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
+    validate_profile(&input.profile)?;
+    let profile_id = input.profile.profile_id.clone();
+    if let Some((purpose, _)) = model_key_source(&input.profile) {
+        provider.store.save(
+            &provider_secret_account(&profile_id, purpose),
+            input.model_api_key.as_deref(),
+        )?;
+    }
+    if let Some((purpose, _)) = search_key_source(&input.profile) {
+        provider.store.save(
+            &provider_secret_account(&profile_id, purpose),
+            input.search_api_key.as_deref(),
+        )?;
+    }
+    if let Some((purpose, _)) = embedding_key_source(&input.profile) {
+        if purpose.starts_with("embedding:") {
+            provider.store.save(
+                &provider_secret_account(&profile_id, purpose),
+                input.embedding_api_key.as_deref(),
+            )?;
+        }
+    }
+
+    let mut profiles = provider.profiles()?;
+    if let Some(existing) = profiles
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.profile_id == profile_id)
+    {
+        *existing = input.profile;
+    } else {
+        profiles.profiles.push(input.profile);
+    }
+    profiles.active_profile_id = profile_id;
+    provider.save_profiles(profiles)?;
+    provider_setup_state(provider.inner())
+}
+
+#[tauri::command]
+fn activate_research_provider_profile(
+    provider: State<'_, ResearchProviderState>,
+    profile_id: String,
+) -> Result<ResearchProviderSetup, String> {
+    let mut profiles = provider.profiles()?;
+    if !profiles
+        .profiles
+        .iter()
+        .any(|profile| profile.profile_id == profile_id)
+    {
+        return Err("Research provider profile not found.".to_string());
+    }
+    profiles.active_profile_id = profile_id;
+    provider.save_profiles(profiles)?;
+    provider_setup_state(provider.inner())
+}
+
+#[tauri::command]
+fn delete_research_provider_profile(
+    provider: State<'_, ResearchProviderState>,
+    profile_id: String,
+) -> Result<ResearchProviderSetup, String> {
+    let mut profiles = provider.profiles()?;
+    if !profiles
+        .profiles
+        .iter()
+        .any(|profile| profile.profile_id == profile_id)
+    {
+        return Err("Research provider profile not found.".to_string());
+    }
+    for purpose in profile_secret_purposes() {
+        provider
+            .store
+            .clear(&provider_secret_account(&profile_id, purpose))?;
+    }
+    profiles
+        .profiles
+        .retain(|profile| profile.profile_id != profile_id);
+    if profiles.profiles.is_empty() {
+        profiles = ResearchProviderProfiles::default();
+    } else if profiles.active_profile_id == profile_id {
+        profiles.active_profile_id = profiles.profiles[0].profile_id.clone();
+    }
+    provider.save_profiles(profiles)?;
     provider_setup_state(provider.inner())
 }
 
@@ -659,9 +1140,81 @@ fn save_research_provider_setup(
 fn clear_research_provider_setup(
     provider: State<'_, ResearchProviderState>,
 ) -> Result<ResearchProviderSetup, String> {
-    provider.store.clear(OPENAI_KEY_ACCOUNT)?;
-    provider.store.clear(TAVILY_KEY_ACCOUNT)?;
+    let profile = provider.active_profile()?;
+    for purpose in profile_secret_purposes() {
+        provider
+            .store
+            .clear(&provider_secret_account(&profile.profile_id, purpose))?;
+    }
     provider_setup_state(provider.inner())
+}
+
+fn ollama_endpoint_reachable(base_url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(base_url).map_err(|error| error.to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Ollama base URL has no host.".to_string())?;
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "Ollama base URL has no port.".to_string())?;
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|error| error.to_string())?;
+    for address in addresses {
+        if TcpStream::connect_timeout(&address, Duration::from_millis(300)).is_ok() {
+            return Ok(());
+        }
+    }
+    Err(format!("Nothing is listening at {host}:{port}."))
+}
+
+fn add_provider_key_preflight(
+    provider: &ResearchProviderState,
+    profile: &ResearchProviderProfile,
+    source: Option<(&str, &str)>,
+    key: &str,
+    label: &str,
+    checks: &mut Vec<ResearchPreflightCheck>,
+    fixes: &mut Vec<String>,
+) {
+    match profile_key_configuration_source(provider, profile, source) {
+        Ok(Some("not required")) => checks.push(preflight_check(
+            key,
+            label,
+            "pass",
+            &format!("{} does not require an API key.", label),
+            Some("Configured by the active provider profile.".to_string()),
+        )),
+        Ok(Some(configuration_source)) => checks.push(preflight_check(
+            key,
+            label,
+            "pass",
+            &format!("{} is configured.", label),
+            Some(format!("Configured through {configuration_source}.")),
+        )),
+        Ok(None) => {
+            checks.push(preflight_check(
+                key,
+                label,
+                "fail",
+                &format!("{} is not configured.", label),
+                None,
+            ));
+            fixes.push(format!(
+                "Add {label} access to the active Provider Profile."
+            ));
+        }
+        Err(error) => {
+            checks.push(preflight_check(
+                key,
+                label,
+                "fail",
+                &format!("Wutai could not check {}.", label.to_lowercase()),
+                Some(error),
+            ));
+            fixes.push(format!("Save {label} access again in Provider Profiles."));
+        }
+    }
 }
 
 #[tauri::command]
@@ -752,63 +1305,87 @@ fn check_gpt_researcher(provider: State<'_, ResearchProviderState>) -> ResearchP
         }
     }
 
-    match provider.key_configuration_source(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY") {
-        Ok(Some(source)) => checks.push(preflight_check(
-            "openai_api_key",
-            "Model access",
-            "pass",
-            "Model access is configured.",
-            Some(format!("Configured through {source}.")),
-        )),
-        Ok(None) => {
+    match provider.active_profile() {
+        Ok(profile) => {
             checks.push(preflight_check(
-                "openai_api_key",
-                "Model access",
-                "fail",
-                "Model access is not configured.",
-                None,
+                "provider_profile",
+                "Provider Profile",
+                "pass",
+                &format!("{} is active.", profile.name),
+                Some(format!(
+                    "Model: {} / Search: {} / Embedding: {}",
+                    profile.model_provider, profile.search_provider, profile.embedding_provider
+                )),
             ));
-            fixes.push("Paste a model access key in Research setup and save it.".to_string());
-        }
-        Err(error) => {
-            checks.push(preflight_check(
-                "openai_api_key",
+            add_provider_key_preflight(
+                provider.inner(),
+                &profile,
+                model_key_source(&profile),
+                "model_access",
                 "Model access",
-                "fail",
-                "Wutai could not check model access.",
-                Some(error),
-            ));
-            fixes.push("Try saving the model access key again in Research setup.".to_string());
-        }
-    }
+                &mut checks,
+                &mut fixes,
+            );
+            add_provider_key_preflight(
+                provider.inner(),
+                &profile,
+                search_key_source(&profile),
+                "search_access",
+                "Web search",
+                &mut checks,
+                &mut fixes,
+            );
+            add_provider_key_preflight(
+                provider.inner(),
+                &profile,
+                embedding_key_source(&profile),
+                "embedding_access",
+                "Document memory",
+                &mut checks,
+                &mut fixes,
+            );
 
-    match provider.key_configuration_source(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY") {
-        Ok(Some(source)) => checks.push(preflight_check(
-            "tavily_api_key",
-            "Web search",
-            "pass",
-            "Web search is configured.",
-            Some(format!("Configured through {source}.")),
-        )),
-        Ok(None) => {
-            checks.push(preflight_check(
-                "tavily_api_key",
-                "Web search",
-                "fail",
-                "Web search is not configured.",
-                None,
-            ));
-            fixes.push("Paste a web search key in Research setup and save it.".to_string());
+            if profile.model_provider == "ollama" || profile.embedding_provider == "ollama" {
+                let base_url = if profile.model_provider == "ollama" {
+                    profile.model_base_url.as_deref()
+                } else {
+                    profile.embedding_base_url.as_deref()
+                };
+                match base_url
+                    .ok_or_else(|| "Ollama base URL is missing.".to_string())
+                    .and_then(ollama_endpoint_reachable)
+                {
+                    Ok(()) => checks.push(preflight_check(
+                        "ollama_endpoint",
+                        "Ollama",
+                        "pass",
+                        "Wutai can reach the local Ollama service.",
+                        base_url.map(str::to_string),
+                    )),
+                    Err(error) => {
+                        checks.push(preflight_check(
+                            "ollama_endpoint",
+                            "Ollama",
+                            "fail",
+                            "Wutai cannot reach the configured Ollama service.",
+                            Some(error),
+                        ));
+                        fixes.push(
+                            "Start Ollama or change its base URL in Advanced settings.".to_string(),
+                        );
+                    }
+                }
+            }
         }
         Err(error) => {
             checks.push(preflight_check(
-                "tavily_api_key",
-                "Web search",
+                "provider_profile",
+                "Provider Profile",
                 "fail",
-                "Wutai could not check web search access.",
+                "Wutai could not load the active Provider Profile.",
                 Some(error),
             ));
-            fixes.push("Try saving the web search key again in Research setup.".to_string());
+            fixes.push("Open Provider Profiles and save a valid profile.".to_string());
         }
     }
 
@@ -845,13 +1422,7 @@ fn run_gpt_researcher(
 ) -> Result<GptResearcherRunOutput, String> {
     let script_path = gpt_researcher_adapter_script()?;
     let mut errors = Vec::new();
-    let openai_key = provider.configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
-    let tavily_key = provider.configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
-    let sensitive_values = [openai_key.as_ref(), tavily_key.as_ref()]
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect::<Vec<_>>();
+    let runtime = build_provider_runtime(provider.inner())?;
     if state.contains(&input.task_id)? {
         return Err("A GPT Researcher sidecar is already running for this task.".to_string());
     }
@@ -873,14 +1444,8 @@ fn run_gpt_researcher(
             .arg("--task-id")
             .arg(&input.task_id)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        if let Some(ref key) = openai_key {
-            command.env("OPENAI_API_KEY", key);
-        }
-        if let Some(ref key) = tavily_key {
-            command.env("TAVILY_API_KEY", key);
-        }
+            .stderr(Stdio::piped())
+            .envs(&runtime.environment);
 
         let mut child = match command.spawn() {
             Ok(child) => child,
@@ -900,7 +1465,7 @@ fn run_gpt_researcher(
             .ok_or_else(|| "Unable to capture GPT Researcher stderr.".to_string())?;
         let stdout_reader = read_pipe_to_string(stdout);
         let stderr_reader =
-            read_stderr_with_progress(stderr, progress.clone(), sensitive_values.clone());
+            read_stderr_with_progress(stderr, progress.clone(), runtime.sensitive_values.clone());
         let child = Arc::new(Mutex::new(child));
 
         if let Err(error) = state.register(&input.task_id, child.clone()) {
@@ -926,6 +1491,20 @@ fn run_gpt_researcher(
                 serde_json::from_str(&stdout).map_err(|error| {
                     format!("GPT Researcher adapter returned invalid JSON: {error}")
                 })?;
+            if let Some(audit) = output.audit.as_object_mut() {
+                audit.insert(
+                    "providerProfile".to_string(),
+                    serde_json::json!({
+                        "profileId": runtime.profile.profile_id,
+                        "name": runtime.profile.name,
+                        "modelProvider": runtime.profile.model_provider,
+                        "model": runtime.profile.model,
+                        "searchProvider": runtime.profile.search_provider,
+                        "embeddingProvider": runtime.profile.embedding_provider,
+                        "embeddingModel": runtime.profile.embedding_model,
+                    }),
+                );
+            }
             output.logs = sidecar_log_lines(&stderr);
             output.progress = sidecar_phase_events(&stderr);
             return Ok(output);
@@ -957,15 +1536,24 @@ pub fn run() {
     tauri::Builder::default()
         .manage(SidecarRegistry::default())
         .manage(ResearchProviderState::default())
+        .setup(|app| {
+            let profile_path = app.path().app_data_dir()?.join(PROFILE_CONFIG_FILE);
+            app.state::<ResearchProviderState>()
+                .initialize_profiles(profile_path)
+                .map_err(std::io::Error::other)?;
+            Ok(())
+        })
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:wutai.db", migrations)
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            activate_research_provider_profile,
             cancel_gpt_researcher,
             check_gpt_researcher,
             clear_research_provider_setup,
+            delete_research_provider_profile,
             get_research_provider_setup,
             save_research_provider_setup,
             write_task_artifacts,
@@ -1031,9 +1619,11 @@ mod tests {
             .manage(provider)
             .manage(registry)
             .invoke_handler(tauri::generate_handler![
+                activate_research_provider_profile,
                 cancel_gpt_researcher,
                 check_gpt_researcher,
                 clear_research_provider_setup,
+                delete_research_provider_profile,
                 get_research_provider_setup,
                 save_research_provider_setup
             ])
@@ -1075,23 +1665,22 @@ mod tests {
     #[test]
     fn secret_store_round_trip_does_not_use_the_system_keychain() {
         let store = MemorySecretStore::default();
+        let account = provider_secret_account("test-profile", "model:openai");
 
-        store
-            .save(OPENAI_KEY_ACCOUNT, Some("  stored-secret  "))
-            .unwrap();
+        store.save(&account, Some("  stored-secret  ")).unwrap();
         assert_eq!(
-            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            store.read(&account).unwrap().as_deref(),
             Some("stored-secret")
         );
 
-        store.save(OPENAI_KEY_ACCOUNT, Some("   ")).unwrap();
+        store.save(&account, Some("   ")).unwrap();
         assert_eq!(
-            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            store.read(&account).unwrap().as_deref(),
             Some("stored-secret")
         );
 
-        store.clear(OPENAI_KEY_ACCOUNT).unwrap();
-        assert_eq!(store.read(OPENAI_KEY_ACCOUNT).unwrap(), None);
+        store.clear(&account).unwrap();
+        assert_eq!(store.read(&account).unwrap(), None);
     }
 
     #[test]
@@ -1146,6 +1735,142 @@ mod tests {
             .unwrap_err(),
             "keychain unavailable"
         );
+    }
+
+    #[test]
+    fn deepseek_profile_maps_to_gpt_researcher_environment() {
+        let store = Arc::new(MemorySecretStore::default());
+        store
+            .save(
+                &provider_secret_account("deepseek-local", "model:deepseek"),
+                Some("deepseek-secret"),
+            )
+            .unwrap();
+        store
+            .save(
+                &provider_secret_account("deepseek-local", "search:tavily"),
+                Some("tavily-secret"),
+            )
+            .unwrap();
+        let provider = ResearchProviderState::new(store, HashMap::new());
+
+        let runtime = build_provider_runtime(&provider).unwrap();
+
+        assert_eq!(
+            runtime.environment["FAST_LLM"],
+            "deepseek:deepseek-v4-flash"
+        );
+        assert_eq!(
+            runtime.environment["SMART_LLM"],
+            "deepseek:deepseek-v4-flash"
+        );
+        assert_eq!(runtime.environment["RETRIEVER"], "tavily");
+        assert_eq!(runtime.environment["EMBEDDING"], "ollama:nomic-embed-text");
+        assert_eq!(runtime.environment["DEEPSEEK_API_KEY"], "deepseek-secret");
+        assert_eq!(runtime.environment["TAVILY_API_KEY"], "tavily-secret");
+        assert_eq!(
+            runtime.environment["OLLAMA_BASE_URL"],
+            "http://127.0.0.1:11434"
+        );
+        assert!(!runtime.environment.contains_key("OPENAI_API_KEY"));
+        assert_eq!(runtime.sensitive_values.len(), 2);
+    }
+
+    #[test]
+    fn openai_model_key_is_reused_for_openai_embeddings() {
+        let store = Arc::new(MemorySecretStore::default());
+        let profile = ResearchProviderProfile {
+            profile_id: "openai-test".to_string(),
+            name: "OpenAI test".to_string(),
+            model_provider: "openai".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            model_base_url: None,
+            search_provider: "duckduckgo".to_string(),
+            embedding_provider: "openai".to_string(),
+            embedding_model: "text-embedding-3-small".to_string(),
+            embedding_base_url: None,
+        };
+        store
+            .save(
+                &provider_secret_account(&profile.profile_id, "model:openai"),
+                Some("one-openai-secret"),
+            )
+            .unwrap();
+        let provider = ResearchProviderState::new(store, HashMap::new());
+        provider
+            .save_profiles(ResearchProviderProfiles {
+                active_profile_id: profile.profile_id.clone(),
+                profiles: vec![profile],
+            })
+            .unwrap();
+
+        let runtime = build_provider_runtime(&provider).unwrap();
+
+        assert_eq!(runtime.environment["FAST_LLM"], "openai:gpt-4o-mini");
+        assert_eq!(runtime.environment["RETRIEVER"], "duckduckgo");
+        assert_eq!(
+            runtime.environment["EMBEDDING"],
+            "openai:text-embedding-3-small"
+        );
+        assert_eq!(runtime.environment["OPENAI_API_KEY"], "one-openai-secret");
+        assert_eq!(runtime.sensitive_values, ["one-openai-secret"]);
+    }
+
+    #[test]
+    fn provider_specific_key_is_not_reused_after_switching_model_provider() {
+        let store = Arc::new(MemorySecretStore::default());
+        store
+            .save(
+                &provider_secret_account("deepseek-local", "model:openai"),
+                Some("openai-only-secret"),
+            )
+            .unwrap();
+        store
+            .save(
+                &provider_secret_account("deepseek-local", "search:tavily"),
+                Some("search-secret"),
+            )
+            .unwrap();
+        let provider = ResearchProviderState::new(store, HashMap::new());
+
+        assert_eq!(
+            build_provider_runtime(&provider).unwrap_err(),
+            "The active Provider Profile is missing model access."
+        );
+    }
+
+    #[test]
+    fn profile_metadata_persists_without_keychain_secrets() {
+        let store = Arc::new(MemorySecretStore::default());
+        store
+            .save(
+                &provider_secret_account("deepseek-local", "model:deepseek"),
+                Some("must-not-enter-profile-json"),
+            )
+            .unwrap();
+        let provider = ResearchProviderState::new(store, HashMap::new());
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wutai-provider-profiles-{}-{unique}.json",
+            std::process::id()
+        ));
+        provider.initialize_profiles(path.clone()).unwrap();
+        let mut profiles = provider.profiles().unwrap();
+        profiles.profiles[0].name = "Persisted profile".to_string();
+        provider.save_profiles(profiles).unwrap();
+
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Persisted profile"));
+        assert!(!content.contains("must-not-enter-profile-json"));
+
+        let reloaded =
+            ResearchProviderState::new(Arc::new(MemorySecretStore::default()), HashMap::new());
+        reloaded.initialize_profiles(path.clone()).unwrap();
+        assert_eq!(reloaded.active_profile().unwrap().name, "Persisted profile");
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1255,32 +1980,68 @@ mod tests {
             "save_research_provider_setup",
             json!({
                 "input": {
-                    "openaiApiKey": "model-secret",
-                    "tavilyApiKey": "search-secret"
+                    "profile": {
+                        "profileId": "openai-test",
+                        "name": "OpenAI test",
+                        "modelProvider": "openai",
+                        "model": "gpt-4o-mini",
+                        "modelBaseUrl": null,
+                        "searchProvider": "tavily",
+                        "embeddingProvider": "openai",
+                        "embeddingModel": "text-embedding-3-small",
+                        "embeddingBaseUrl": null
+                    },
+                    "modelApiKey": "model-secret",
+                    "searchApiKey": "search-secret",
+                    "embeddingApiKey": null
                 }
             }),
         )
         .unwrap();
-        assert_eq!(saved["openaiKeyConfigured"], true);
-        assert_eq!(saved["tavilyKeyConfigured"], true);
+        assert_eq!(saved["activeProfile"]["profileId"], "openai-test");
+        assert_eq!(saved["modelKeyConfigured"], true);
+        assert_eq!(saved["searchKeyConfigured"], true);
+        assert_eq!(saved["embeddingKeyConfigured"], true);
         assert_eq!(
-            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            store
+                .read(&provider_secret_account("openai-test", "model:openai"))
+                .unwrap()
+                .as_deref(),
             Some("model-secret")
         );
 
         let preflight = invoke_json(&webview, "check_gpt_researcher", json!({})).unwrap();
         let checks = preflight["checks"].as_array().unwrap();
-        for key in ["openai_api_key", "tavily_api_key"] {
+        for key in ["model_access", "search_access", "embedding_access"] {
             let check = checks.iter().find(|check| check["key"] == key).unwrap();
             assert_eq!(check["status"], "pass");
             assert_eq!(check["detail"], "Configured through Wutai setup.");
         }
 
         let cleared = invoke_json(&webview, "clear_research_provider_setup", json!({})).unwrap();
-        assert_eq!(cleared["openaiKeyConfigured"], false);
-        assert_eq!(cleared["tavilyKeyConfigured"], false);
-        assert_eq!(store.read(OPENAI_KEY_ACCOUNT).unwrap(), None);
-        assert_eq!(store.read(TAVILY_KEY_ACCOUNT).unwrap(), None);
+        assert_eq!(cleared["modelKeyConfigured"], false);
+        assert_eq!(cleared["searchKeyConfigured"], false);
+        assert_eq!(cleared["embeddingKeyConfigured"], false);
+        assert_eq!(
+            store
+                .read(&provider_secret_account("openai-test", "model:openai"))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .read(&provider_secret_account("openai-test", "search:tavily"))
+                .unwrap(),
+            None
+        );
+
+        let deleted = invoke_json(
+            &webview,
+            "delete_research_provider_profile",
+            json!({ "profileId": "openai-test" }),
+        )
+        .unwrap();
+        assert_eq!(deleted["activeProfile"]["profileId"], "deepseek-local");
     }
 
     #[cfg(unix)]

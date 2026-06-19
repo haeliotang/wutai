@@ -125,18 +125,25 @@ cargo test --manifest-path src-tauri/Cargo.toml \
   installed_gpt_researcher_sidecar_smoke -- --ignored
 ```
 
-Then open Research setup in the app and save the model access key and web search
-key. Wutai stores these in the system keychain through `keyring-rs`. Developers
-can still use `OPENAI_API_KEY` and `TAVILY_API_KEY` as environment-variable
-fallbacks.
+Then open Research setup in the app and choose a Provider Profile. Model,
+search, and embedding providers are configured independently. The current UI
+supports DeepSeek, OpenAI, OpenAI-compatible endpoints, and Ollama for models;
+Tavily or DuckDuckGo for search; and OpenAI-compatible or Ollama embeddings.
+The default profile is DeepSeek + Tavily + local Ollama embeddings.
+
+Profile metadata is stored in the app-data directory. API keys are stored
+separately in the system keychain through `keyring-rs` and are scoped by
+profile, provider, and purpose. Developers can still use `DEEPSEEK_API_KEY`,
+`OPENAI_API_KEY`, and `TAVILY_API_KEY` as environment-variable fallbacks.
 
 Without `VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher`, Wutai keeps using the
 offline mock adapter for local development and e2e tests.
 
 When the GPT Researcher adapter is enabled, Wutai runs a startup setup check
-for Python, the sidecar script, the `gpt-researcher` package, and the required
-access keys. If setup is incomplete, Wutai blocks new real research tasks and
-shows the missing steps in the app. While a real research task is running, Stop
+for Python, the sidecar script, the `gpt-researcher` package, the active
+Provider Profile, required access keys, and a configured Ollama endpoint when
+used. If setup is incomplete, Wutai blocks new real research tasks and shows
+the missing steps in the app. While a real research task is running, Stop
 asks Tauri to terminate the Python sidecar process for that task. Sidecar stderr
 logs stream through a Tauri IPC Channel into expert-only task events and stay
 hidden from the default timeline. Structured sidecar stages provide stable
@@ -156,6 +163,12 @@ Run the core scenario e2e test:
 npm run test:e2e
 ```
 
+Run the Provider Profiles UI contract test:
+
+```bash
+npm run test:e2e:providers
+```
+
 Run the desktop command and IPC tests:
 
 ```bash
@@ -163,16 +176,18 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 These Rust tests use Tauri's official mock runtime and an in-memory credential
-store, never the user's system keychain. They cover provider-key precedence,
-setup preflight and process cancellation through the Tauri invoke handler, plus
-the streaming stderr parser; Playwright covers the default offline task flow.
+store, never the user's system keychain. They cover profile validation,
+provider-to-runtime mapping, provider-key precedence, setup preflight and
+process cancellation through the Tauri invoke handler, plus the streaming
+stderr parser; Playwright covers the default offline task flow and the
+Provider Profiles UI at desktop minimum width.
 
 ## Repository Status
 
 This repository contains the first runnable Wutai shell scaffold. It includes
 task creation, task-scoped permission, local persistence, artifact writing, an
 offline mock research adapter, and an optional GPT Researcher sidecar with
-keychain-backed setup preflight.
+Provider Profiles and keychain-backed setup preflight.
 It does not yet implement browser-use, Codex app-server integration, full
 computer-use control, voice, or production packaging.
 
