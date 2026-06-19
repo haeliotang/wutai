@@ -231,18 +231,22 @@ export default function App() {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      let latestTask = nextTask;
       try {
         await researchAdapter.run(
           nextTask,
           controller.signal,
-          persist,
+          async (task) => {
+            latestTask = task;
+            await persist(task);
+          },
           artifactWriter,
         );
       } catch (error) {
         const wasAbort = error instanceof DOMException && error.name === "AbortError";
         const failedTask = appendEvent(
           {
-            ...nextTask,
+            ...latestTask,
             status: wasAbort ? "cancelled" : "failed",
             updatedAt: new Date().toISOString(),
           },

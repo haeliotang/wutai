@@ -3,14 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 const KEYRING_SERVICE: &str = "com.haeliotang.wutai.research";
@@ -52,6 +52,16 @@ struct GptResearcherRunOutput {
     audit: serde_json::Value,
     #[serde(default)]
     logs: Vec<String>,
+    #[serde(default)]
+    progress: Vec<GptResearcherProgressEvent>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GptResearcherProgressEvent {
+    kind: String,
+    phase: Option<String>,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -428,6 +438,38 @@ where
     })
 }
 
+fn read_stderr_with_progress<R>(
+    pipe: R,
+    progress: Channel<GptResearcherProgressEvent>,
+    sensitive_values: Vec<String>,
+) -> thread::JoinHandle<Result<String, String>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut output = String::new();
+        for line in BufReader::new(pipe).lines() {
+            let line = line.map_err(|error| error.to_string())?;
+            let line = redact_sensitive_values(&line, &sensitive_values);
+            output.push_str(&line);
+            output.push('\n');
+            if let Some(event) = sidecar_progress_event(&line) {
+                let _ = progress.send(event);
+            }
+        }
+        Ok(output)
+    })
+}
+
+fn redact_sensitive_values(line: &str, sensitive_values: &[String]) -> String {
+    sensitive_values
+        .iter()
+        .filter(|value| !value.is_empty())
+        .fold(line.to_string(), |redacted, value| {
+            redacted.replace(value, "[REDACTED]")
+        })
+}
+
 fn wait_for_child(child: &Arc<Mutex<Child>>) -> Result<std::process::ExitStatus, String> {
     loop {
         {
@@ -449,25 +491,57 @@ fn collect_reader_output(
         .map_err(|_| "Unable to join sidecar output reader.".to_string())?
 }
 
+const SIDECAR_PROGRESS_PREFIX: &str = "WUTAI_PROGRESS ";
+
+fn sidecar_phase_event(line: &str) -> Option<GptResearcherProgressEvent> {
+    let payload = line.trim().strip_prefix(SIDECAR_PROGRESS_PREFIX)?;
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let phase = value.get("phase")?.as_str()?.trim();
+    let message = value.get("message")?.as_str()?.trim();
+    if phase.is_empty() || message.is_empty() {
+        return None;
+    }
+
+    Some(GptResearcherProgressEvent {
+        kind: "phase".to_string(),
+        phase: Some(phase.to_string()),
+        message: message.to_string(),
+    })
+}
+
+fn sidecar_log_event(line: &str) -> Option<GptResearcherProgressEvent> {
+    let line = line.trim();
+    if line.is_empty() || sidecar_phase_event(line).is_some() {
+        return None;
+    }
+
+    let mut characters = line.chars();
+    let truncated: String = characters.by_ref().take(497).collect();
+    let message = if characters.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        line.to_string()
+    };
+    Some(GptResearcherProgressEvent {
+        kind: "log".to_string(),
+        phase: None,
+        message,
+    })
+}
+
+fn sidecar_progress_event(line: &str) -> Option<GptResearcherProgressEvent> {
+    sidecar_phase_event(line).or_else(|| sidecar_log_event(line))
+}
+
+fn sidecar_phase_events(stderr: &str) -> Vec<GptResearcherProgressEvent> {
+    stderr.lines().filter_map(sidecar_phase_event).collect()
+}
+
 fn sidecar_log_lines(stderr: &str) -> Vec<String> {
     stderr
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .rev()
-        .take(80)
-        .map(|line| {
-            let mut characters = line.chars();
-            let truncated: String = characters.by_ref().take(497).collect();
-            if characters.next().is_some() {
-                format!("{truncated}...")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
+        .filter_map(sidecar_log_event)
+        .map(|event| event.message)
         .collect()
 }
 
@@ -711,12 +785,18 @@ fn cancel_gpt_researcher(
 fn run_gpt_researcher(
     state: State<'_, SidecarRegistry>,
     provider: State<'_, ResearchProviderState>,
+    progress: Channel<GptResearcherProgressEvent>,
     input: GptResearcherRunInput,
 ) -> Result<GptResearcherRunOutput, String> {
     let script_path = gpt_researcher_adapter_script()?;
     let mut errors = Vec::new();
     let openai_key = provider.configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
     let tavily_key = provider.configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
+    let sensitive_values = [openai_key.as_ref(), tavily_key.as_ref()]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
     if state.contains(&input.task_id)? {
         return Err("A GPT Researcher sidecar is already running for this task.".to_string());
     }
@@ -764,7 +844,8 @@ fn run_gpt_researcher(
             .take()
             .ok_or_else(|| "Unable to capture GPT Researcher stderr.".to_string())?;
         let stdout_reader = read_pipe_to_string(stdout);
-        let stderr_reader = read_pipe_to_string(stderr);
+        let stderr_reader =
+            read_stderr_with_progress(stderr, progress.clone(), sensitive_values.clone());
         let child = Arc::new(Mutex::new(child));
 
         if let Err(error) = state.register(&input.task_id, child.clone()) {
@@ -791,10 +872,11 @@ fn run_gpt_researcher(
                     format!("GPT Researcher adapter returned invalid JSON: {error}")
                 })?;
             output.logs = sidecar_log_lines(&stderr);
+            output.progress = sidecar_phase_events(&stderr);
             return Ok(output);
         }
 
-        let mut message = stderr.trim().to_string();
+        let mut message = sidecar_log_lines(&stderr).join("\n");
         if message.is_empty() {
             message = format!("GPT Researcher adapter exited with status {status}");
         }
@@ -842,6 +924,7 @@ pub fn run() {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::Cursor;
     use tauri::{
         ipc::{CallbackFn, InvokeBody},
         test::{
@@ -1007,6 +1090,68 @@ mod tests {
             )
             .unwrap_err(),
             "keychain unavailable"
+        );
+    }
+
+    #[test]
+    fn stderr_reader_streams_phases_and_logs_while_preserving_audit_lines() {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_for_channel = received.clone();
+        let channel = Channel::new(move |body| {
+            let event = body.deserialize::<GptResearcherProgressEvent>().unwrap();
+            received_for_channel.lock().unwrap().push(event);
+            Ok(())
+        });
+        let stderr = concat!(
+            "WUTAI_PROGRESS {\"phase\":\"researching\",\"message\":\"Reading sources.\"}\n",
+            "first runtime log\n",
+            "WUTAI_PROGRESS malformed\n",
+            "credential=secret-token\n"
+        );
+
+        let captured = read_stderr_with_progress(
+            Cursor::new(stderr.as_bytes().to_vec()),
+            channel,
+            vec!["secret-token".to_string()],
+        )
+        .join()
+        .unwrap()
+        .unwrap();
+        assert!(!captured.contains("secret-token"));
+        assert!(captured.contains("credential=[REDACTED]"));
+        assert_eq!(
+            received.lock().unwrap().as_slice(),
+            [
+                GptResearcherProgressEvent {
+                    kind: "phase".to_string(),
+                    phase: Some("researching".to_string()),
+                    message: "Reading sources.".to_string(),
+                },
+                GptResearcherProgressEvent {
+                    kind: "log".to_string(),
+                    phase: None,
+                    message: "first runtime log".to_string(),
+                },
+                GptResearcherProgressEvent {
+                    kind: "log".to_string(),
+                    phase: None,
+                    message: "WUTAI_PROGRESS malformed".to_string(),
+                },
+                GptResearcherProgressEvent {
+                    kind: "log".to_string(),
+                    phase: None,
+                    message: "credential=[REDACTED]".to_string(),
+                },
+            ]
+        );
+        assert_eq!(sidecar_phase_events(&captured).len(), 1);
+        assert_eq!(
+            sidecar_log_lines(&captured),
+            [
+                "first runtime log",
+                "WUTAI_PROGRESS malformed",
+                "credential=[REDACTED]"
+            ]
         );
     }
 

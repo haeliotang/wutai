@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type { ArtifactRecord, SourceRecord, WutaiTask } from "../domain/task";
 import { appendEvent } from "../domain/task";
 import type {
@@ -18,7 +18,17 @@ interface GptResearcherRunOutput {
   sources: GptResearcherSource[];
   audit: unknown;
   logs?: string[];
+  progress?: GptResearcherProgressEvent[];
 }
+
+interface GptResearcherProgressEvent {
+  kind: "phase" | "log";
+  phase?: string;
+  message: string;
+}
+
+const MAX_TASK_LOG_EVENTS = 200;
+const STREAM_UPDATE_INTERVAL_MS = 200;
 
 function assertNotAborted(signal: AbortSignal) {
   if (signal.aborted) {
@@ -76,6 +86,84 @@ export const gptResearcherAdapter: ResearchAdapter = {
 
     assertNotAborted(signal);
 
+    const streamedLogCounts = new Map<string, number>();
+    const seenPhases = new Set<string>();
+    let observedLogCount = 0;
+    let acceptChannelEvents = true;
+    let streamUpdateError: unknown;
+    let streamUpdatePending = false;
+    let pendingPublish: ReturnType<typeof setTimeout> | undefined;
+    let updateQueue = Promise.resolve();
+
+    const publishStreamSnapshot = () => {
+      if (!streamUpdatePending) return;
+      streamUpdatePending = false;
+      const snapshot = task;
+      updateQueue = updateQueue
+        .then(async () => onUpdate(snapshot))
+        .catch((error) => {
+          streamUpdateError ??= error;
+        });
+    };
+
+    const scheduleStreamUpdate = () => {
+      streamUpdatePending = true;
+      if (pendingPublish !== undefined) return;
+      pendingPublish = setTimeout(() => {
+        pendingPublish = undefined;
+        publishStreamSnapshot();
+      }, STREAM_UPDATE_INTERVAL_MS);
+    };
+
+    const flushStreamUpdates = async () => {
+      if (pendingPublish !== undefined) {
+        clearTimeout(pendingPublish);
+        pendingPublish = undefined;
+      }
+      publishStreamSnapshot();
+      await updateQueue;
+      if (streamUpdateError) {
+        throw streamUpdateError;
+      }
+    };
+
+    const applyProgressEvent = (event: GptResearcherProgressEvent) => {
+      const message = event.message?.trim();
+      if (!message) return;
+
+      if (event.kind === "phase") {
+        const phase = event.phase?.trim() || message;
+        if (seenPhases.has(phase)) return;
+        seenPhases.add(phase);
+        task = appendEvent(task, {
+          type: "TaskStepUpdated",
+          summary: message,
+          visibility: "user",
+        });
+      } else {
+        observedLogCount += 1;
+        if (observedLogCount > MAX_TASK_LOG_EVENTS) return;
+        task = appendEvent(task, {
+          type: "ToolLogAdded",
+          summary: `GPT Researcher sidecar: ${expertLogSummary(message)}`,
+          details: message,
+          visibility: "expert",
+        });
+      }
+      scheduleStreamUpdate();
+    };
+
+    const progressChannel = new Channel<GptResearcherProgressEvent>((event) => {
+      if (!acceptChannelEvents || signal.aborted) return;
+      if (event.kind === "log") {
+        streamedLogCounts.set(
+          event.message,
+          (streamedLogCounts.get(event.message) ?? 0) + 1,
+        );
+      }
+      applyProgressEvent(event);
+    });
+
     task = appendEvent(task, {
       type: "TaskStepUpdated",
       summary: "Running open-source deep research adapter.",
@@ -92,8 +180,11 @@ export const gptResearcherAdapter: ResearchAdapter = {
           reportType: "research_report",
           tone: "objective",
         },
+        progress: progressChannel,
       });
     } catch (error) {
+      acceptChannelEvents = false;
+      await flushStreamUpdates();
       if (signal.aborted) {
         throw new DOMException("Task cancelled", "AbortError");
       }
@@ -102,16 +193,33 @@ export const gptResearcherAdapter: ResearchAdapter = {
       signal.removeEventListener("abort", cancelSidecar);
     }
 
+    acceptChannelEvents = false;
+    await flushStreamUpdates();
     assertNotAborted(signal);
 
+    for (const event of result.progress ?? []) {
+      applyProgressEvent(event);
+    }
+
     for (const log of result.logs ?? []) {
+      const streamedCount = streamedLogCounts.get(log) ?? 0;
+      if (streamedCount > 0) {
+        streamedLogCounts.set(log, streamedCount - 1);
+      } else {
+        applyProgressEvent({ kind: "log", message: log });
+      }
+    }
+
+    if (observedLogCount > MAX_TASK_LOG_EVENTS) {
       task = appendEvent(task, {
         type: "ToolLogAdded",
-        summary: `GPT Researcher sidecar: ${expertLogSummary(log)}`,
-        details: log,
+        summary: "Additional sidecar logs are retained in audit.json.",
+        details: `Task history keeps the first ${MAX_TASK_LOG_EVENTS} sidecar log lines. The audit artifact keeps all ${observedLogCount} captured lines.`,
         visibility: "expert",
       });
+      scheduleStreamUpdate();
     }
+    await flushStreamUpdates();
 
     const createdAt = new Date().toISOString();
     const sourceRecords: SourceRecord[] = result.sources.map((source, index) => ({

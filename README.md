@@ -128,8 +128,11 @@ for Python, the sidecar script, the `gpt-researcher` package, and the required
 access keys. If setup is incomplete, Wutai blocks new real research tasks and
 shows the missing steps in the app. While a real research task is running, Stop
 asks Tauri to terminate the Python sidecar process for that task. Sidecar stderr
-logs are stored as expert-only task events and stay hidden from the default
-timeline.
+logs stream through a Tauri IPC Channel into expert-only task events and stay
+hidden from the default timeline. Structured sidecar stages provide stable
+plain-language progress for normal users. Task history keeps at most 200 expert
+log events; `audit.json` retains every captured, redacted, per-line-bounded log
+entry.
 
 Build the frontend:
 
@@ -151,8 +154,8 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 These Rust tests use Tauri's official mock runtime and an in-memory credential
 store, never the user's system keychain. They cover provider-key precedence,
-setup preflight and process cancellation through the Tauri invoke handler;
-Playwright covers the default offline task flow.
+setup preflight and process cancellation through the Tauri invoke handler, plus
+the streaming stderr parser; Playwright covers the default offline task flow.
 
 ## Repository Status
 

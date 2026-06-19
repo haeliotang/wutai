@@ -11,6 +11,13 @@ import sys
 from importlib import metadata
 from typing import Any
 
+PROGRESS_PREFIX = "WUTAI_PROGRESS "
+
+
+def _emit_progress(phase: str, message: str) -> None:
+    payload = json.dumps({"phase": phase, "message": message}, ensure_ascii=False)
+    print(f"{PROGRESS_PREFIX}{payload}", file=sys.stderr, flush=True)
+
 
 def _stringify(value: Any) -> str:
     if value is None:
@@ -84,6 +91,7 @@ def _package_version(package_name: str) -> str | None:
 
 
 async def _run(task_id: str, query: str, report_type: str, tone: str) -> dict[str, Any]:
+    _emit_progress("initializing", "Preparing the research runtime.")
     try:
         from gpt_researcher import GPTResearcher
     except ImportError as error:
@@ -93,9 +101,12 @@ async def _run(task_id: str, query: str, report_type: str, tone: str) -> dict[st
         ) from error
 
     researcher = GPTResearcher(query=query, report_type=report_type, tone=tone)
+    _emit_progress("researching", "Searching and reading public sources.")
     await researcher.conduct_research()
+    _emit_progress("drafting", "Drafting the sourced research report.")
     report = await researcher.write_report()
 
+    _emit_progress("finalizing", "Organizing sources and audit details.")
     research_sources = researcher.get_research_sources()
     source_urls = researcher.get_source_urls()
     research_costs = researcher.get_costs()
