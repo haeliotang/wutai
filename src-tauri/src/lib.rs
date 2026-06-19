@@ -97,6 +97,109 @@ struct SidecarRegistry {
     cancelled: Mutex<HashSet<String>>,
 }
 
+trait ProviderSecretStore {
+    fn read(&self, account: &str) -> Result<Option<String>, String>;
+    fn save(&self, account: &str, value: Option<&str>) -> Result<(), String>;
+    fn clear(&self, account: &str) -> Result<(), String>;
+}
+
+struct SystemKeyringStore;
+
+impl ProviderSecretStore for SystemKeyringStore {
+    fn read(&self, account: &str) -> Result<Option<String>, String> {
+        match provider_key_entry(account)?.get_password() {
+            Ok(value) => Ok(normalize_secret(Some(value))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn save(&self, account: &str, value: Option<&str>) -> Result<(), String> {
+        if let Some(value) = normalize_secret(value.map(str::to_string)) {
+            provider_key_entry(account)?
+                .set_password(&value)
+                .map_err(|error| error.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    fn clear(&self, account: &str) -> Result<(), String> {
+        match provider_key_entry(account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+impl SidecarRegistry {
+    fn contains(&self, task_id: &str) -> Result<bool, String> {
+        Ok(self
+            .processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .contains_key(task_id))
+    }
+
+    fn register(&self, task_id: &str, child: Arc<Mutex<Child>>) -> Result<(), String> {
+        let mut processes = self.processes.lock().map_err(|error| error.to_string())?;
+        if processes.contains_key(task_id) {
+            return Err("A GPT Researcher sidecar is already running for this task.".to_string());
+        }
+        processes.insert(task_id.to_string(), child);
+        Ok(())
+    }
+
+    fn remove(&self, task_id: &str) -> Result<Option<Arc<Mutex<Child>>>, String> {
+        Ok(self
+            .processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(task_id))
+    }
+
+    fn mark_cancelled(&self, task_id: &str) -> Result<(), String> {
+        self.cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(task_id.to_string());
+        Ok(())
+    }
+
+    fn take_cancelled(&self, task_id: &str) -> Result<bool, String> {
+        Ok(self
+            .cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(task_id))
+    }
+
+    fn cancel(&self, task_id: &str) -> Result<bool, String> {
+        self.mark_cancelled(task_id)?;
+        let child = self
+            .processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .get(task_id)
+            .cloned();
+
+        let Some(child) = child else {
+            return Ok(false);
+        };
+        let mut child = child.lock().map_err(|error| error.to_string())?;
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(false);
+        }
+
+        child.kill().map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+}
+
 fn preflight_check(
     key: &str,
     label: &str,
@@ -117,85 +220,100 @@ fn provider_key_entry(account: &str) -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, account).map_err(|error| error.to_string())
 }
 
-fn read_provider_key(account: &str) -> Result<Option<String>, String> {
-    match provider_key_entry(account)?.get_password() {
-        Ok(value) if value.trim().is_empty() => Ok(None),
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(error.to_string()),
-    }
+fn normalize_secret(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
-fn save_provider_key(account: &str, value: Option<&str>) -> Result<(), String> {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        provider_key_entry(account)?
-            .set_password(value)
-            .map_err(|error| error.to_string())?;
-    }
-
-    Ok(())
-}
-
-fn clear_provider_key(account: &str) -> Result<(), String> {
-    match provider_key_entry(account)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-fn env_key_present(name: &str) -> bool {
-    std::env::var(name)
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
-}
-
-fn configured_key(account: &str, env_name: &str) -> Result<Option<String>, String> {
-    match read_provider_key(account) {
+fn configured_key_from_sources(
+    stored_key: Result<Option<String>, String>,
+    environment_key: Option<String>,
+) -> Result<Option<String>, String> {
+    let environment_key = normalize_secret(environment_key);
+    match stored_key.map(normalize_secret) {
         Ok(Some(value)) => return Ok(Some(value)),
         Ok(None) => {}
         Err(error) => {
-            if let Some(value) = std::env::var(env_name)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-            {
+            if let Some(value) = environment_key {
                 return Ok(Some(value));
             }
             return Err(error);
         }
     }
 
-    Ok(std::env::var(env_name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty()))
+    Ok(environment_key)
 }
 
-fn key_configuration_source(account: &str, env_name: &str) -> Result<Option<&'static str>, String> {
-    match read_provider_key(account) {
+fn key_configuration_source_from_sources(
+    stored_key: Result<Option<String>, String>,
+    environment_key: Option<String>,
+) -> Result<Option<&'static str>, String> {
+    let environment_key = normalize_secret(environment_key);
+    match stored_key.map(normalize_secret) {
         Ok(Some(_)) => return Ok(Some("Wutai setup")),
         Ok(None) => {}
         Err(error) => {
-            if env_key_present(env_name) {
+            if environment_key.is_some() {
                 return Ok(Some("environment"));
             }
             return Err(error);
         }
     }
 
-    if env_key_present(env_name) {
+    if environment_key.is_some() {
         return Ok(Some("environment"));
     }
 
     Ok(None)
 }
 
-fn provider_setup_state() -> Result<ResearchProviderSetup, String> {
+fn configured_key_with_store(
+    store: &impl ProviderSecretStore,
+    account: &str,
+    env_name: &str,
+) -> Result<Option<String>, String> {
+    configured_key_from_sources(store.read(account), std::env::var(env_name).ok())
+}
+
+fn key_configuration_source_with_store(
+    store: &impl ProviderSecretStore,
+    account: &str,
+    env_name: &str,
+) -> Result<Option<&'static str>, String> {
+    key_configuration_source_from_sources(store.read(account), std::env::var(env_name).ok())
+}
+
+fn configured_key(account: &str, env_name: &str) -> Result<Option<String>, String> {
+    configured_key_with_store(&SystemKeyringStore, account, env_name)
+}
+
+fn key_configuration_source(account: &str, env_name: &str) -> Result<Option<&'static str>, String> {
+    key_configuration_source_with_store(&SystemKeyringStore, account, env_name)
+}
+
+fn provider_setup_state_with_store(
+    store: &impl ProviderSecretStore,
+) -> Result<ResearchProviderSetup, String> {
     Ok(ResearchProviderSetup {
-        openai_key_configured: configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?.is_some(),
-        tavily_key_configured: configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?.is_some(),
+        openai_key_configured: configured_key_with_store(
+            store,
+            OPENAI_KEY_ACCOUNT,
+            "OPENAI_API_KEY",
+        )?
+        .is_some(),
+        tavily_key_configured: configured_key_with_store(
+            store,
+            TAVILY_KEY_ACCOUNT,
+            "TAVILY_API_KEY",
+        )?
+        .is_some(),
         secret_store: "system keychain".to_string(),
     })
+}
+
+fn provider_setup_state() -> Result<ResearchProviderSetup, String> {
+    provider_setup_state_with_store(&SystemKeyringStore)
 }
 
 fn sanitize_path_segment(value: &str) -> String {
@@ -388,15 +506,17 @@ fn get_research_provider_setup() -> Result<ResearchProviderSetup, String> {
 fn save_research_provider_setup(
     input: ResearchProviderSetupInput,
 ) -> Result<ResearchProviderSetup, String> {
-    save_provider_key(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
-    save_provider_key(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
+    let store = SystemKeyringStore;
+    store.save(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
+    store.save(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
     provider_setup_state()
 }
 
 #[tauri::command]
 fn clear_research_provider_setup() -> Result<ResearchProviderSetup, String> {
-    clear_provider_key(OPENAI_KEY_ACCOUNT)?;
-    clear_provider_key(TAVILY_KEY_ACCOUNT)?;
+    let store = SystemKeyringStore;
+    store.clear(OPENAI_KEY_ACCOUNT)?;
+    store.clear(TAVILY_KEY_ACCOUNT)?;
     provider_setup_state()
 }
 
@@ -569,34 +689,7 @@ fn cancel_gpt_researcher(
     state: State<'_, SidecarRegistry>,
     task_id: String,
 ) -> Result<bool, String> {
-    state
-        .cancelled
-        .lock()
-        .map_err(|error| error.to_string())?
-        .insert(task_id.clone());
-
-    let child = state
-        .processes
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(&task_id)
-        .cloned();
-
-    if let Some(child) = child {
-        let mut child = child.lock().map_err(|error| error.to_string())?;
-        if child
-            .try_wait()
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            return Ok(false);
-        }
-
-        child.kill().map_err(|error| error.to_string())?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    state.cancel(&task_id)
 }
 
 #[tauri::command]
@@ -608,22 +701,12 @@ fn run_gpt_researcher(
     let mut errors = Vec::new();
     let openai_key = configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
     let tavily_key = configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
-    if state
-        .processes
-        .lock()
-        .map_err(|error| error.to_string())?
-        .contains_key(&input.task_id)
-    {
+    if state.contains(&input.task_id)? {
         return Err("A GPT Researcher sidecar is already running for this task.".to_string());
     }
 
     for python_path in gpt_researcher_python_candidates() {
-        if state
-            .cancelled
-            .lock()
-            .map_err(|error| error.to_string())?
-            .remove(&input.task_id)
-        {
+        if state.take_cancelled(&input.task_id)? {
             return Err("GPT Researcher task was cancelled.".to_string());
         }
 
@@ -668,30 +751,15 @@ fn run_gpt_researcher(
         let stderr_reader = read_pipe_to_string(stderr);
         let child = Arc::new(Mutex::new(child));
 
-        {
-            let mut processes = state.processes.lock().map_err(|error| error.to_string())?;
-            if processes.contains_key(&input.task_id) {
-                let _ = child.lock().map_err(|error| error.to_string())?.kill();
-                return Err(
-                    "A GPT Researcher sidecar is already running for this task.".to_string()
-                );
-            }
-            processes.insert(input.task_id.clone(), child.clone());
+        if let Err(error) = state.register(&input.task_id, child.clone()) {
+            let _ = child.lock().map_err(|error| error.to_string())?.kill();
+            return Err(error);
         }
 
         let status = wait_for_child(&child);
 
-        state
-            .processes
-            .lock()
-            .map_err(|error| error.to_string())?
-            .remove(&input.task_id);
-
-        let was_cancelled = state
-            .cancelled
-            .lock()
-            .map_err(|error| error.to_string())?
-            .remove(&input.task_id);
+        state.remove(&input.task_id)?;
+        let was_cancelled = state.take_cancelled(&input.task_id)?;
 
         let stdout = collect_reader_output(stdout_reader)?;
         let stderr = collect_reader_output(stderr_reader)?;
@@ -751,4 +819,151 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Wutai");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct MemorySecretStore {
+        values: Mutex<HashMap<String, String>>,
+    }
+
+    impl ProviderSecretStore for MemorySecretStore {
+        fn read(&self, account: &str) -> Result<Option<String>, String> {
+            Ok(self
+                .values
+                .lock()
+                .map_err(|error| error.to_string())?
+                .get(account)
+                .cloned())
+        }
+
+        fn save(&self, account: &str, value: Option<&str>) -> Result<(), String> {
+            if let Some(value) = normalize_secret(value.map(str::to_string)) {
+                self.values
+                    .lock()
+                    .map_err(|error| error.to_string())?
+                    .insert(account.to_string(), value);
+            }
+            Ok(())
+        }
+
+        fn clear(&self, account: &str) -> Result<(), String> {
+            self.values
+                .lock()
+                .map_err(|error| error.to_string())?
+                .remove(account);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn secret_store_round_trip_does_not_use_the_system_keychain() {
+        let store = MemorySecretStore::default();
+
+        store
+            .save(OPENAI_KEY_ACCOUNT, Some("  stored-secret  "))
+            .unwrap();
+        assert_eq!(
+            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            Some("stored-secret")
+        );
+
+        store.save(OPENAI_KEY_ACCOUNT, Some("   ")).unwrap();
+        assert_eq!(
+            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            Some("stored-secret")
+        );
+
+        store.clear(OPENAI_KEY_ACCOUNT).unwrap();
+        assert_eq!(store.read(OPENAI_KEY_ACCOUNT).unwrap(), None);
+    }
+
+    #[test]
+    fn stored_secret_takes_precedence_over_environment_fallback() {
+        let configured = configured_key_from_sources(
+            Ok(Some("stored-secret".to_string())),
+            Some("environment-secret".to_string()),
+        )
+        .unwrap();
+        let source = key_configuration_source_from_sources(
+            Ok(Some("stored-secret".to_string())),
+            Some("environment-secret".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(configured.as_deref(), Some("stored-secret"));
+        assert_eq!(source, Some("Wutai setup"));
+    }
+
+    #[test]
+    fn environment_secret_is_used_when_storage_is_empty_or_unavailable() {
+        for stored_key in [Ok(None), Err("keychain unavailable".to_string())] {
+            assert_eq!(
+                configured_key_from_sources(stored_key, Some("  environment-secret  ".to_string()))
+                    .unwrap()
+                    .as_deref(),
+                Some("environment-secret")
+            );
+        }
+
+        assert_eq!(
+            key_configuration_source_from_sources(
+                Err("keychain unavailable".to_string()),
+                Some("environment-secret".to_string())
+            )
+            .unwrap(),
+            Some("environment")
+        );
+    }
+
+    #[test]
+    fn storage_error_is_reported_when_no_environment_fallback_exists() {
+        assert_eq!(
+            configured_key_from_sources(Err("keychain unavailable".to_string()), None).unwrap_err(),
+            "keychain unavailable"
+        );
+        assert_eq!(
+            key_configuration_source_from_sources(
+                Err("keychain unavailable".to_string()),
+                Some("   ".to_string())
+            )
+            .unwrap_err(),
+            "keychain unavailable"
+        );
+    }
+
+    #[test]
+    fn cancelling_an_unregistered_task_is_remembered() {
+        let registry = SidecarRegistry::default();
+
+        assert!(!registry.cancel("task-before-spawn").unwrap());
+        assert!(registry.take_cancelled("task-before-spawn").unwrap());
+        assert!(!registry.take_cancelled("task-before-spawn").unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_a_registered_process_kills_and_cleans_it_up() {
+        let registry = SidecarRegistry::default();
+        let child = Arc::new(Mutex::new(
+            Command::new("sh")
+                .arg("-c")
+                .arg("sleep 30")
+                .spawn()
+                .unwrap(),
+        ));
+
+        registry.register("running-task", child.clone()).unwrap();
+        assert!(registry.contains("running-task").unwrap());
+        assert!(registry.register("running-task", child.clone()).is_err());
+        assert!(registry.cancel("running-task").unwrap());
+        child.lock().unwrap().wait().unwrap();
+
+        registry.remove("running-task").unwrap();
+        assert!(!registry.contains("running-task").unwrap());
+        assert!(registry.take_cancelled("running-task").unwrap());
+    }
 }
