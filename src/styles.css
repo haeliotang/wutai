@@ -277,6 +277,7 @@ select:focus {
 .timeline-section,
 .permission-box,
 .research-setup,
+.evidence-section,
 .artifact-section {
   border: 1px solid #2f332c;
   border-radius: 8px;
@@ -459,6 +460,89 @@ select:focus {
   font-size: 13px;
 }
 
+.evidence-section {
+  display: grid;
+  gap: 14px;
+}
+
+.evidence-section > p {
+  color: #d4d1c5;
+  line-height: 1.6;
+}
+
+.evidence-section .panel-header > strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.evidence-pass {
+  border-color: #3c6a36;
+}
+
+.evidence-pass .panel-header > strong {
+  color: #95e884;
+}
+
+.evidence-warning,
+.evidence-fail {
+  border-color: #6f5b22;
+  background: #120f07;
+}
+
+.evidence-warning .panel-header > strong,
+.evidence-fail .panel-header > strong {
+  color: #ffb085;
+}
+
+.evidence-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #2b2f29;
+  border-bottom: 1px solid #2b2f29;
+  padding: 12px 0;
+}
+
+.evidence-metrics span {
+  display: grid;
+  gap: 5px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
+.evidence-metrics strong {
+  color: #f4f1e8;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.evidence-checks {
+  display: grid;
+  gap: 8px;
+}
+
+.evidence-checks > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.evidence-checks p {
+  color: #b8b6aa;
+  line-height: 1.45;
+}
+
+.evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.evidence-actions button {
+  padding: 0 14px;
+}
+
 .permission-actions {
   display: flex;
   min-width: 170px;
@@ -526,7 +610,8 @@ select:focus {
   .status-grid,
   .permission-box,
   .provider-setup-form,
-  .provider-advanced-grid {
+  .provider-advanced-grid,
+  .evidence-metrics {
     grid-template-columns: 1fr;
   }
 

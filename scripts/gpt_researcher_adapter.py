@@ -11,6 +11,8 @@ import sys
 from importlib import metadata
 from typing import Any
 
+from evidence_gate import run_evidence_gate
+
 PROGRESS_PREFIX = "WUTAI_PROGRESS "
 
 
@@ -83,6 +85,37 @@ def _normalize_sources(raw_sources: Any, source_urls: Any) -> list[dict[str, str
     return normalized
 
 
+def _normalize_evidence_sources(
+    raw_sources: Any, source_urls: Any
+) -> list[dict[str, str]]:
+    normalized = _normalize_sources(raw_sources, source_urls)
+    evidence_by_url: dict[str, str] = {}
+    if isinstance(raw_sources, list):
+        for source in raw_sources:
+            if not isinstance(source, dict):
+                continue
+            item = _source_from_mapping(source)
+            if item is None:
+                continue
+            evidence_by_url[item["url"]] = _compact_note(
+                source.get("raw_content")
+                or source.get("content")
+                or source.get("summary")
+                or source.get("snippet")
+                or item["note"],
+                limit=4000,
+            )
+    return [
+        {
+            "title": source["title"],
+            "url": source["url"],
+            "note": source["note"],
+            "evidence": evidence_by_url.get(source["url"], source["note"]),
+        }
+        for source in normalized
+    ]
+
+
 def _package_version(package_name: str) -> str | None:
     try:
         return metadata.version(package_name)
@@ -106,14 +139,25 @@ async def _run(task_id: str, query: str, report_type: str, tone: str) -> dict[st
     _emit_progress("drafting", "Drafting the sourced research report.")
     report = await researcher.write_report()
 
-    _emit_progress("finalizing", "Organizing sources and audit details.")
     research_sources = researcher.get_research_sources()
     source_urls = researcher.get_source_urls()
     research_costs = researcher.get_costs()
+    normalized_sources = _normalize_sources(research_sources, source_urls)
+
+    _emit_progress("verifying", "Checking claims against captured evidence.")
+    claims, verification = await run_evidence_gate(
+        task_id,
+        report,
+        _normalize_evidence_sources(research_sources, source_urls),
+    )
+
+    _emit_progress("finalizing", "Organizing sources and audit details.")
 
     return {
         "report": report,
-        "sources": _normalize_sources(research_sources, source_urls),
+        "sources": normalized_sources,
+        "claims": claims,
+        "verification": verification,
         "audit": {
             "adapter": "gpt-researcher",
             "taskId": task_id,
@@ -122,6 +166,8 @@ async def _run(task_id: str, query: str, report_type: str, tone: str) -> dict[st
             "tone": tone,
             "costs": research_costs,
             "sourceCount": len(research_sources or []),
+            "evidenceGateVersion": "0.1",
+            "evidenceGateStatus": verification["status"],
         },
     }
 

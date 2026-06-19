@@ -5,6 +5,7 @@ import {
   type WutaiTask,
 } from "../domain/task";
 import type { ArtifactWriter } from "../artifacts/artifactWriter";
+import type { EvidenceVerification } from "../domain/evidence";
 import type { ResearchAdapter, TaskUpdateHandler } from "./researchAdapter";
 
 const sources: Array<Omit<SourceRecord, "sourceId" | "taskId">> = [
@@ -117,6 +118,62 @@ export async function runMockResearchAdapter(
 
   const createdAt = new Date().toISOString();
   const report = buildReport(task);
+  const claims = {
+    schemaVersion: 1,
+    taskId: task.taskId,
+    generatedAt: createdAt,
+    claims: [
+      {
+        claimId: "claim_001",
+        text: "GPT Researcher is the selected research runtime for Wutai v0.1.",
+        entity: "GPT Researcher",
+        category: "product_identity",
+        risk: "high",
+        statementType: "factual_claim",
+        support: "supported",
+        evidenceSummary: "The official repository identifies GPT Researcher.",
+        sources: [
+          {
+            url: sources[0].url,
+            title: sources[0].title,
+            tier: "repository",
+          },
+        ],
+      },
+    ],
+  };
+  const verification: EvidenceVerification = {
+    schemaVersion: 1,
+    taskId: task.taskId,
+    status: "pass",
+    readyForTrust: true,
+    summary: "Evidence checks passed for the mock research fixture.",
+    generatedAt: createdAt,
+    metrics: {
+      claimCount: 1,
+      factualClaimCount: 1,
+      citationCoverage: 1,
+      primarySourceCount: 4,
+      highRiskGapCount: 0,
+      conflictCount: 0,
+    },
+    checks: [
+      {
+        key: "claim_extraction",
+        label: "Claim extraction",
+        status: "pass",
+        message: "Captured 1 reviewable claim.",
+        claimIds: [],
+      },
+      {
+        key: "primary_evidence",
+        label: "Primary evidence",
+        status: "pass",
+        message: "Every high-risk claim has supporting primary evidence.",
+        claimIds: [],
+      },
+    ],
+  };
   const artifacts: ArtifactRecord[] = [
     {
       artifactId: `${task.taskId}_artifact_report`,
@@ -134,6 +191,24 @@ export async function runMockResearchAdapter(
       name: "sources.json",
       virtualPath: `artifacts/${task.taskId}/sources.json`,
       content: JSON.stringify(sourceRecords, null, 2),
+      createdAt,
+    },
+    {
+      artifactId: `${task.taskId}_artifact_claims`,
+      taskId: task.taskId,
+      type: "json",
+      name: "claims.json",
+      virtualPath: `artifacts/${task.taskId}/claims.json`,
+      content: JSON.stringify(claims, null, 2),
+      createdAt,
+    },
+    {
+      artifactId: `${task.taskId}_artifact_verification`,
+      taskId: task.taskId,
+      type: "json",
+      name: "verification.json",
+      virtualPath: `artifacts/${task.taskId}/verification.json`,
+      content: JSON.stringify(verification, null, 2),
       createdAt,
     },
     {
@@ -170,7 +245,7 @@ export async function runMockResearchAdapter(
 
   task = appendEvent(task, {
     type: "ArtifactCreated",
-    summary: "Saved report.md, sources.json, and audit.json as task artifacts.",
+    summary: "Saved report, sources, claims, verification, and audit artifacts.",
     details:
       artifactWriter.backendName === "Tauri app-data files"
         ? "Artifacts were written to the local Tauri app-data directory."

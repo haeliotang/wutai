@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createArtifactWriter, type ArtifactWriter } from "./artifacts/artifactWriter";
+import {
+  evidenceStatusLabel,
+  parseEvidenceVerification,
+} from "./domain/evidence";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
 import { createResearchAdapter } from "./runtime/createResearchAdapter";
 import {
@@ -27,6 +31,11 @@ function formatTime(value: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(value));
+}
+
+function formatTaskStatus(status: WutaiTask["status"]) {
+  if (status === "completed_with_warnings") return "needs review";
+  return status.replaceAll("_", " ");
 }
 
 function downloadArtifact(name: string, content: string) {
@@ -281,6 +290,24 @@ export default function App() {
     [activeTask],
   );
 
+  const claimsArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "claims.json") ?? null,
+    [activeTask],
+  );
+
+  const verificationArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "verification.json") ??
+      null,
+    [activeTask],
+  );
+
+  const evidenceVerification = useMemo(() => {
+    const artifact = verificationArtifact;
+    return artifact ? parseEvidenceVerification(artifact.content) : null;
+  }, [verificationArtifact]);
+
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
 
@@ -467,7 +494,7 @@ export default function App() {
                   onClick={() => setActiveTask(task)}
                 >
                   <span>{task.title}</span>
-                  <small>{task.status}</small>
+                  <small>{formatTaskStatus(task.status)}</small>
                 </button>
               ))
             )}
@@ -817,7 +844,7 @@ export default function App() {
               <div className="status-grid">
                 <div>
                   <span>Status</span>
-                  <strong>{activeTask.status}</strong>
+                  <strong>{formatTaskStatus(activeTask.status)}</strong>
                 </div>
                 <div>
                   <span>Sources</span>
@@ -884,6 +911,83 @@ export default function App() {
                     ))}
                 </div>
               </section>
+
+              {evidenceVerification && (
+                <section
+                  className={`evidence-section evidence-${evidenceVerification.status}`}
+                  aria-label="Evidence Gate"
+                >
+                  <div className="panel-header">
+                    <h2>Evidence Gate</h2>
+                    <strong>
+                      {evidenceStatusLabel(evidenceVerification.status)}
+                    </strong>
+                  </div>
+                  <p>{evidenceVerification.summary}</p>
+                  <div className="evidence-metrics">
+                    <span>
+                      Claims <strong>{evidenceVerification.metrics.claimCount}</strong>
+                    </span>
+                    <span>
+                      Citation coverage{" "}
+                      <strong>
+                        {Math.round(
+                          evidenceVerification.metrics.citationCoverage * 100,
+                        )}
+                        %
+                      </strong>
+                    </span>
+                    <span>
+                      Primary sources{" "}
+                      <strong>
+                        {evidenceVerification.metrics.primarySourceCount}
+                      </strong>
+                    </span>
+                    <span>
+                      Review items{" "}
+                      <strong>
+                        {evidenceVerification.metrics.highRiskGapCount +
+                          evidenceVerification.metrics.conflictCount}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="evidence-checks">
+                    {evidenceVerification.checks.map((check) => (
+                      <div key={check.key}>
+                        <span className={`preflight-status preflight-${check.status}`}>
+                          {check.status}
+                        </span>
+                        <p>{check.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="evidence-actions">
+                    {claimsArtifact && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadArtifact(claimsArtifact.name, claimsArtifact.content)
+                        }
+                      >
+                        Download claims
+                      </button>
+                    )}
+                    {verificationArtifact && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadArtifact(
+                            verificationArtifact.name,
+                            verificationArtifact.content,
+                          )
+                        }
+                      >
+                        Download verification
+                      </button>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {reportArtifact && (
                 <section className="artifact-section">

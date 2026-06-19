@@ -3,6 +3,7 @@ export type TaskStatus =
   | "waiting_for_permission"
   | "running"
   | "completed"
+  | "completed_with_warnings"
   | "failed"
   | "cancelled";
 
@@ -90,7 +91,7 @@ export function createTask(userRequest: string): WutaiTask {
       "Search public sources for relevant open-source projects.",
       "Read selected public project pages and capture source notes.",
       "Draft a concise market comparison report.",
-      "Save report, source list, and audit trail as artifacts.",
+      "Save the report, sources, claim ledger, evidence verification, and audit trail.",
     ],
     createdAt: now,
     updatedAt: now,

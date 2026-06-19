@@ -49,6 +49,10 @@ struct GptResearcherSource {
 struct GptResearcherRunOutput {
     report: String,
     sources: Vec<GptResearcherSource>,
+    #[serde(default)]
+    claims: serde_json::Value,
+    #[serde(default)]
+    verification: serde_json::Value,
     audit: serde_json::Value,
     #[serde(default)]
     logs: Vec<String>,
@@ -1884,6 +1888,27 @@ mod tests {
         for version in ["3.10.18", "3.14.0", "4.0.0", "unknown"] {
             assert!(!supported_python_version(version));
         }
+    }
+
+    #[test]
+    fn sidecar_output_preserves_claim_and_verification_payloads() {
+        let output: GptResearcherRunOutput = serde_json::from_value(json!({
+            "report": "# Report",
+            "sources": [],
+            "claims": {
+                "schemaVersion": 1,
+                "claims": [{ "claimId": "claim_001" }]
+            },
+            "verification": {
+                "schemaVersion": 1,
+                "status": "warning"
+            },
+            "audit": {}
+        }))
+        .unwrap();
+
+        assert_eq!(output.claims["claims"][0]["claimId"], "claim_001");
+        assert_eq!(output.verification["status"], "warning");
     }
 
     #[test]

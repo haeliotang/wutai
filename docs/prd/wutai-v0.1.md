@@ -208,6 +208,8 @@ The core artifact is Markdown:
 
 - `artifacts/<task_id>/report.md`
 - `artifacts/<task_id>/sources.json`
+- `artifacts/<task_id>/claims.json`
+- `artifacts/<task_id>/verification.json`
 - `artifacts/<task_id>/audit.json`
 
 Markdown is required for v0.1 because it is transparent, easy to diff, and easy
@@ -347,7 +349,8 @@ The v0.1 core scenario is complete when:
 7. Denying permission prevents execution and records the decision.
 8. Approving permission starts the research adapter.
 9. Progress appears as plain-language timeline events.
-10. The task creates `report.md`, `sources.json`, and `audit.json`.
+10. The task creates `report.md`, `sources.json`, `claims.json`,
+    `verification.json`, and `audit.json`.
 11. The completion view links to the artifact.
 12. The user can reopen the task and inspect the audit trail.
 13. No default offline flow exposes MCP, skills, raw terminal output, or
@@ -358,6 +361,10 @@ The v0.1 core scenario is complete when:
     storing API keys in the profile metadata file.
 16. Model, search, and embedding providers can be changed independently, while
     Base URL and embedding controls remain under Advanced settings.
+17. A report with missing primary evidence or locked reference-fact conflicts
+    is shown as needing review rather than fully trusted.
+18. Evidence verification distinguishes factual claims, vendor claims,
+    third-party observations, and inferences.
 
 ## 10. Implementation Milestones
 
@@ -382,6 +389,8 @@ The v0.1 core scenario is complete when:
 - Event translation.
 - Markdown report artifact.
 - Source and audit files.
+- Claim ledger and evidence verification artifacts.
+- Visible `completed_with_warnings` state for reports that need evidence review.
 - Provider Profiles for DeepSeek, OpenAI, OpenAI-compatible endpoints, and
   Ollama-backed local models.
 

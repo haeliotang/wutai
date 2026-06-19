@@ -149,7 +149,11 @@ logs stream through a Tauri IPC Channel into expert-only task events and stay
 hidden from the default timeline. Structured sidecar stages provide stable
 plain-language progress for normal users. Task history keeps at most 200 expert
 log events; `audit.json` retains every captured, redacted, per-line-bounded log
-entry.
+entry. Evidence Gate v0.1 extracts a structured claim ledger after report
+generation, classifies captured source provenance with deterministic rules, and
+marks tasks that need evidence review instead of presenting every generated
+report as fully trusted. Each real research task writes `report.md`,
+`sources.json`, `claims.json`, `verification.json`, and `audit.json`.
 
 Build the frontend:
 
@@ -169,6 +173,12 @@ Run the Provider Profiles UI contract test:
 npm run test:e2e:providers
 ```
 
+Run the offline Evidence Gate regressions:
+
+```bash
+npm run test:evidence
+```
+
 Run the desktop command and IPC tests:
 
 ```bash
@@ -180,14 +190,17 @@ store, never the user's system keychain. They cover profile validation,
 provider-to-runtime mapping, provider-key precedence, setup preflight and
 process cancellation through the Tauri invoke handler, plus the streaming
 stderr parser; Playwright covers the default offline task flow and the
-Provider Profiles UI at desktop minimum width.
+Provider Profiles UI at desktop minimum width. Python unit tests cover source
+classification, evidence warnings, and locked OpenClaw/Multica license facts
+without calling external APIs.
 
 ## Repository Status
 
 This repository contains the first runnable Wutai shell scaffold. It includes
 task creation, task-scoped permission, local persistence, artifact writing, an
 offline mock research adapter, and an optional GPT Researcher sidecar with
-Provider Profiles and keychain-backed setup preflight.
+Provider Profiles, Evidence Gate artifacts, and keychain-backed setup
+preflight.
 It does not yet implement browser-use, Codex app-server integration, full
 computer-use control, voice, or production packaging.
 

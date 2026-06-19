@@ -139,6 +139,8 @@ Core tables:
 - `permissions`
 - `artifacts`
 - `sources`
+- `claims`
+- `evidence_verifications`
 - `personas`
 - `settings`
 

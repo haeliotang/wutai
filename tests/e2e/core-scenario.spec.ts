@@ -16,7 +16,27 @@ test("runs the v0.1 mock research task lifecycle", async ({ page }) => {
   await page.getByRole("button", { name: "Allow for this task" }).click();
 
   await expect(page.getByText("Research task completed.")).toBeVisible();
+  await expect(page.getByLabel("Evidence Gate")).toBeVisible();
+  await expect(page.getByText("Evidence passed")).toBeVisible();
+  await expect(
+    page.getByText("Evidence checks passed for the mock research fixture."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download claims" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download verification" }),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Artifact preview" })).toBeVisible();
   await expect(page.getByText("Wutai v0.1 Mock Research Report")).toBeVisible();
-  await expect(page.getByText("Saved report.md, sources.json, and audit.json")).toBeVisible();
+  await expect(
+    page.getByText("Saved report, sources, claims, verification, and audit artifacts."),
+  ).toBeVisible();
+
+  await page.setViewportSize({ width: 860, height: 700 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });
