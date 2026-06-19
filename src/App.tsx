@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createArtifactWriter, type ArtifactWriter } from "./artifacts/artifactWriter";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
 import { createResearchAdapter } from "./runtime/createResearchAdapter";
+import {
+  clearResearchProviderSetup,
+  saveResearchProviderSetup,
+} from "./runtime/researchProviderSetup";
 import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
@@ -38,6 +42,12 @@ export default function App() {
   const [researchPreflight, setResearchPreflight] =
     useState<ResearchPreflight | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
+  const [modelAccessKey, setModelAccessKey] = useState("");
+  const [webSearchKey, setWebSearchKey] = useState("");
+  const [providerSetupMessage, setProviderSetupMessage] = useState<string | null>(
+    null,
+  );
+  const [providerSetupSaving, setProviderSetupSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -95,6 +105,53 @@ export default function App() {
     setPreflightLoading(true);
     setResearchPreflight(await runPreflight(researchAdapter));
     setPreflightLoading(false);
+  }
+
+  async function saveProviderSetup() {
+    if (!researchAdapter) return;
+
+    setProviderSetupSaving(true);
+    setProviderSetupMessage(null);
+    try {
+      await saveResearchProviderSetup({
+        openaiApiKey: modelAccessKey.trim() || null,
+        tavilyApiKey: webSearchKey.trim() || null,
+      });
+      setModelAccessKey("");
+      setWebSearchKey("");
+      setProviderSetupMessage("Research access was saved to the system keychain.");
+      setResearchPreflight(await runPreflight(researchAdapter));
+    } catch (error) {
+      setProviderSetupMessage(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not save research access.",
+      );
+    } finally {
+      setProviderSetupSaving(false);
+    }
+  }
+
+  async function clearProviderSetup() {
+    if (!researchAdapter) return;
+
+    setProviderSetupSaving(true);
+    setProviderSetupMessage(null);
+    try {
+      await clearResearchProviderSetup();
+      setModelAccessKey("");
+      setWebSearchKey("");
+      setProviderSetupMessage("Saved research access was removed.");
+      setResearchPreflight(await runPreflight(researchAdapter));
+    } catch (error) {
+      setProviderSetupMessage(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not clear research access.",
+      );
+    } finally {
+      setProviderSetupSaving(false);
+    }
   }
 
   const pendingPermission = activeTask?.permissions.find(
@@ -339,6 +396,51 @@ export default function App() {
                   ))}
                 </ul>
               )}
+              <div className="provider-setup-form" aria-label="Provider setup">
+                <label>
+                  <span>Model access key</span>
+                  <input
+                    type="password"
+                    value={modelAccessKey}
+                    onChange={(event) => setModelAccessKey(event.target.value)}
+                    autoComplete="off"
+                    placeholder="Paste key"
+                  />
+                </label>
+                <label>
+                  <span>Web search key</span>
+                  <input
+                    type="password"
+                    value={webSearchKey}
+                    onChange={(event) => setWebSearchKey(event.target.value)}
+                    autoComplete="off"
+                    placeholder="Paste key"
+                  />
+                </label>
+                <div className="provider-setup-actions">
+                  <button
+                    type="button"
+                    className="primary-action"
+                    onClick={saveProviderSetup}
+                    disabled={
+                      providerSetupSaving ||
+                      (!modelAccessKey.trim() && !webSearchKey.trim())
+                    }
+                  >
+                    {providerSetupSaving ? "Saving" : "Save access"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearProviderSetup}
+                    disabled={providerSetupSaving}
+                  >
+                    Clear saved access
+                  </button>
+                </div>
+                {providerSetupMessage && (
+                  <p className="provider-setup-message">{providerSetupMessage}</p>
+                )}
+              </div>
             </section>
           )}
 

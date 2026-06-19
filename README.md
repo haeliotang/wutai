@@ -111,21 +111,25 @@ Run the Tauri shell with the optional GPT Researcher sidecar:
 python3.11 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-gpt-researcher.txt
-export OPENAI_API_KEY=...
-export TAVILY_API_KEY=...
 export WUTAI_GPT_RESEARCHER_PYTHON="$PWD/.venv/bin/python"
 VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher npm run tauri dev
 ```
+
+Then open Research setup in the app and save the model access key and web search
+key. Wutai stores these in the system keychain through `keyring-rs`. Developers
+can still use `OPENAI_API_KEY` and `TAVILY_API_KEY` as environment-variable
+fallbacks.
 
 Without `VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher`, Wutai keeps using the
 offline mock adapter for local development and e2e tests.
 
 When the GPT Researcher adapter is enabled, Wutai runs a startup setup check
 for Python, the sidecar script, the `gpt-researcher` package, and the required
-API keys. If setup is incomplete, Wutai blocks new real research tasks and shows
-the missing steps in the app. While a real research task is running, Stop asks
-Tauri to terminate the Python sidecar process for that task. Sidecar stderr logs
-are stored as expert-only task events and stay hidden from the default timeline.
+access keys. If setup is incomplete, Wutai blocks new real research tasks and
+shows the missing steps in the app. While a real research task is running, Stop
+asks Tauri to terminate the Python sidecar process for that task. Sidecar stderr
+logs are stored as expert-only task events and stay hidden from the default
+timeline.
 
 Build the frontend:
 
@@ -144,7 +148,7 @@ npm run test:e2e
 This repository contains the first runnable Wutai shell scaffold. It includes
 task creation, task-scoped permission, local persistence, artifact writing, an
 offline mock research adapter, and an optional GPT Researcher sidecar with
-setup preflight.
+keychain-backed setup preflight.
 It does not yet implement browser-use, Codex app-server integration, full
 computer-use control, voice, or production packaging.
 

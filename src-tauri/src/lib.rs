@@ -1,3 +1,4 @@
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -11,6 +12,10 @@ use std::{
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
+
+const KEYRING_SERVICE: &str = "com.haeliotang.wutai.research";
+const OPENAI_KEY_ACCOUNT: &str = "openai_api_key";
+const TAVILY_KEY_ACCOUNT: &str = "tavily_api_key";
 
 #[derive(Debug, Deserialize)]
 struct ArtifactPayload {
@@ -71,6 +76,21 @@ struct ResearchPreflight {
     package_version: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResearchProviderSetupInput {
+    openai_api_key: Option<String>,
+    tavily_api_key: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResearchProviderSetup {
+    openai_key_configured: bool,
+    tavily_key_configured: bool,
+    secret_store: String,
+}
+
 #[derive(Default)]
 struct SidecarRegistry {
     processes: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
@@ -91,6 +111,91 @@ fn preflight_check(
         message: message.to_string(),
         detail,
     }
+}
+
+fn provider_key_entry(account: &str) -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, account).map_err(|error| error.to_string())
+}
+
+fn read_provider_key(account: &str) -> Result<Option<String>, String> {
+    match provider_key_entry(account)?.get_password() {
+        Ok(value) if value.trim().is_empty() => Ok(None),
+        Ok(value) => Ok(Some(value)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn save_provider_key(account: &str, value: Option<&str>) -> Result<(), String> {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        provider_key_entry(account)?
+            .set_password(value)
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn clear_provider_key(account: &str) -> Result<(), String> {
+    match provider_key_entry(account)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn env_key_present(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn configured_key(account: &str, env_name: &str) -> Result<Option<String>, String> {
+    match read_provider_key(account) {
+        Ok(Some(value)) => return Ok(Some(value)),
+        Ok(None) => {}
+        Err(error) => {
+            if let Some(value) = std::env::var(env_name)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+            {
+                return Ok(Some(value));
+            }
+            return Err(error);
+        }
+    }
+
+    Ok(std::env::var(env_name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty()))
+}
+
+fn key_configuration_source(account: &str, env_name: &str) -> Result<Option<&'static str>, String> {
+    match read_provider_key(account) {
+        Ok(Some(_)) => return Ok(Some("Wutai setup")),
+        Ok(None) => {}
+        Err(error) => {
+            if env_key_present(env_name) {
+                return Ok(Some("environment"));
+            }
+            return Err(error);
+        }
+    }
+
+    if env_key_present(env_name) {
+        return Ok(Some("environment"));
+    }
+
+    Ok(None)
+}
+
+fn provider_setup_state() -> Result<ResearchProviderSetup, String> {
+    Ok(ResearchProviderSetup {
+        openai_key_configured: configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?.is_some(),
+        tavily_key_configured: configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?.is_some(),
+        secret_store: "system keychain".to_string(),
+    })
 }
 
 fn sanitize_path_segment(value: &str) -> String {
@@ -275,6 +380,27 @@ fn write_task_artifacts(
 }
 
 #[tauri::command]
+fn get_research_provider_setup() -> Result<ResearchProviderSetup, String> {
+    provider_setup_state()
+}
+
+#[tauri::command]
+fn save_research_provider_setup(
+    input: ResearchProviderSetupInput,
+) -> Result<ResearchProviderSetup, String> {
+    save_provider_key(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
+    save_provider_key(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
+    provider_setup_state()
+}
+
+#[tauri::command]
+fn clear_research_provider_setup() -> Result<ResearchProviderSetup, String> {
+    clear_provider_key(OPENAI_KEY_ACCOUNT)?;
+    clear_provider_key(TAVILY_KEY_ACCOUNT)?;
+    provider_setup_state()
+}
+
+#[tauri::command]
 fn check_gpt_researcher() -> ResearchPreflight {
     let mut checks = Vec::new();
     let mut fixes = Vec::new();
@@ -362,44 +488,64 @@ fn check_gpt_researcher() -> ResearchPreflight {
         }
     }
 
-    let openai_key_present = std::env::var("OPENAI_API_KEY")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    checks.push(preflight_check(
-        "openai_api_key",
-        "Model access",
-        if openai_key_present { "pass" } else { "fail" },
-        if openai_key_present {
-            "Model access is configured."
-        } else {
-            "Model access is not configured."
-        },
-        None,
-    ));
-    if !openai_key_present {
-        fixes.push(
-            "Set OPENAI_API_KEY before starting Wutai with the GPT Researcher adapter.".to_string(),
-        );
+    match key_configuration_source(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY") {
+        Ok(Some(source)) => checks.push(preflight_check(
+            "openai_api_key",
+            "Model access",
+            "pass",
+            "Model access is configured.",
+            Some(format!("Configured through {source}.")),
+        )),
+        Ok(None) => {
+            checks.push(preflight_check(
+                "openai_api_key",
+                "Model access",
+                "fail",
+                "Model access is not configured.",
+                None,
+            ));
+            fixes.push("Paste a model access key in Research setup and save it.".to_string());
+        }
+        Err(error) => {
+            checks.push(preflight_check(
+                "openai_api_key",
+                "Model access",
+                "fail",
+                "Wutai could not check model access.",
+                Some(error),
+            ));
+            fixes.push("Try saving the model access key again in Research setup.".to_string());
+        }
     }
 
-    let tavily_key_present = std::env::var("TAVILY_API_KEY")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    checks.push(preflight_check(
-        "tavily_api_key",
-        "Web search",
-        if tavily_key_present { "pass" } else { "fail" },
-        if tavily_key_present {
-            "Web search is configured."
-        } else {
-            "Web search is not configured."
-        },
-        None,
-    ));
-    if !tavily_key_present {
-        fixes.push(
-            "Set TAVILY_API_KEY before starting Wutai with the GPT Researcher adapter.".to_string(),
-        );
+    match key_configuration_source(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY") {
+        Ok(Some(source)) => checks.push(preflight_check(
+            "tavily_api_key",
+            "Web search",
+            "pass",
+            "Web search is configured.",
+            Some(format!("Configured through {source}.")),
+        )),
+        Ok(None) => {
+            checks.push(preflight_check(
+                "tavily_api_key",
+                "Web search",
+                "fail",
+                "Web search is not configured.",
+                None,
+            ));
+            fixes.push("Paste a web search key in Research setup and save it.".to_string());
+        }
+        Err(error) => {
+            checks.push(preflight_check(
+                "tavily_api_key",
+                "Web search",
+                "fail",
+                "Wutai could not check web search access.",
+                Some(error),
+            ));
+            fixes.push("Try saving the web search key again in Research setup.".to_string());
+        }
     }
 
     let ready = checks.iter().all(|check| check.status != "fail");
@@ -460,6 +606,8 @@ fn run_gpt_researcher(
 ) -> Result<GptResearcherRunOutput, String> {
     let script_path = gpt_researcher_adapter_script()?;
     let mut errors = Vec::new();
+    let openai_key = configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
+    let tavily_key = configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
     if state
         .processes
         .lock()
@@ -479,7 +627,8 @@ fn run_gpt_researcher(
             return Err("GPT Researcher task was cancelled.".to_string());
         }
 
-        let mut child = match Command::new(&python_path)
+        let mut command = Command::new(&python_path);
+        command
             .arg(&script_path)
             .arg("--query")
             .arg(&input.query)
@@ -490,9 +639,16 @@ fn run_gpt_researcher(
             .arg("--task-id")
             .arg(&input.task_id)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+            .stderr(Stdio::piped());
+
+        if let Some(ref key) = openai_key {
+            command.env("OPENAI_API_KEY", key);
+        }
+        if let Some(ref key) = tavily_key {
+            command.env("TAVILY_API_KEY", key);
+        }
+
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
                 errors.push(format!("Unable to launch {python_path}: {error}"));
@@ -587,6 +743,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             cancel_gpt_researcher,
             check_gpt_researcher,
+            clear_research_provider_setup,
+            get_research_provider_setup,
+            save_research_provider_setup,
             write_task_artifacts,
             run_gpt_researcher
         ])

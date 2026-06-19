@@ -237,6 +237,7 @@ contracts.
 | Desktop shell | Tauri | Mature open-source desktop shell with lightweight local app model. |
 | UI | React + TypeScript | Mature UI ecosystem and fast iteration. |
 | Local storage | SQLite via Tauri SQL plugin | Local, durable task and audit storage without rebuilding database infrastructure. |
+| Credential storage | System keychain via keyring-rs | Saves provider access keys without building a custom secret store. |
 | Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
@@ -348,8 +349,8 @@ The v0.1 core scenario is complete when:
 10. The task creates `report.md`, `sources.json`, and `audit.json`.
 11. The completion view links to the artifact.
 12. The user can reopen the task and inspect the audit trail.
-13. No v0.1 flow exposes MCP, skills, raw terminal output, or provider setup as
-    default UX.
+13. No default offline flow exposes MCP, skills, raw terminal output, or
+    provider setup.
 14. No v0.1 flow performs file modification, desktop control, email sending, or
     form submission.
 

@@ -22,6 +22,7 @@ body {
 }
 
 button,
+input,
 textarea {
   font: inherit;
 }
@@ -187,6 +188,21 @@ textarea {
   color: #f4f1e8;
   background: transparent;
   line-height: 1.5;
+}
+
+input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #34392f;
+  border-radius: 6px;
+  outline: none;
+  padding: 0 12px;
+  color: #f4f1e8;
+  background: #080908;
+}
+
+input:focus {
+  border-color: #91c789;
 }
 
 .action-bar {
@@ -369,6 +385,41 @@ textarea {
   line-height: 1.7;
 }
 
+.provider-setup-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #2b2f29;
+  padding-top: 14px;
+}
+
+.provider-setup-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.provider-setup-form label span {
+  color: #d6e8c6;
+  font-size: 13px;
+}
+
+.provider-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 10px;
+}
+
+.provider-setup-actions button {
+  padding: 0 14px;
+}
+
+.provider-setup-message {
+  grid-column: 1 / -1;
+  color: #95e884;
+  font-size: 13px;
+}
+
 .permission-actions {
   display: flex;
   min-width: 170px;
@@ -434,7 +485,8 @@ textarea {
   }
 
   .status-grid,
-  .permission-box {
+  .permission-box,
+  .provider-setup-form {
     grid-template-columns: 1fr;
   }
 
