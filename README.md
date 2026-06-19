@@ -85,6 +85,7 @@ Prerequisites:
 - Node.js
 - npm
 - Rust and Cargo
+- Python 3.11 or 3.12 for the optional GPT Researcher sidecar
 
 Install dependencies:
 
@@ -104,6 +105,21 @@ Run the Tauri shell:
 npm run tauri dev
 ```
 
+Run the Tauri shell with the optional GPT Researcher sidecar:
+
+```bash
+python3.11 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-gpt-researcher.txt
+export OPENAI_API_KEY=...
+export TAVILY_API_KEY=...
+export WUTAI_GPT_RESEARCHER_PYTHON="$PWD/.venv/bin/python"
+VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher npm run tauri dev
+```
+
+Without `VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher`, Wutai keeps using the
+offline mock adapter for local development and e2e tests.
+
 Build the frontend:
 
 ```bash
@@ -118,10 +134,11 @@ npm run test:e2e
 
 ## Repository Status
 
-This repository is in product-definition stage. The current documents define
-the first implementation boundary and acceptance criteria. They do not claim
-that the desktop shell, agent adapters, voice system, or permission broker have
-already been implemented.
+This repository contains the first runnable Wutai shell scaffold. It includes
+task creation, task-scoped permission, local persistence, artifact writing, an
+offline mock research adapter, and an optional GPT Researcher sidecar boundary.
+It does not yet implement browser-use, Codex app-server integration, full
+computer-use control, voice, or production packaging.
 
 ## License
 

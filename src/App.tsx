@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createArtifactWriter, type ArtifactWriter } from "./artifacts/artifactWriter";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
-import { runMockResearchAdapter } from "./runtime/mockResearchAdapter";
+import { createResearchAdapter } from "./runtime/createResearchAdapter";
+import type { ResearchAdapter } from "./runtime/researchAdapter";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
@@ -33,6 +34,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [taskStore, setTaskStore] = useState<TaskStore | null>(null);
   const [artifactWriter, setArtifactWriter] = useState<ArtifactWriter | null>(null);
+  const [researchAdapter, setResearchAdapter] = useState<ResearchAdapter | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -41,10 +43,12 @@ export default function App() {
     async function bootstrap() {
       const store = await createTaskStore();
       const writer = createArtifactWriter();
+      const adapter = createResearchAdapter();
       const items = await store.list();
       if (!active) return;
       setTaskStore(store);
       setArtifactWriter(writer);
+      setResearchAdapter(adapter);
       setTasks(items);
       setActiveTask(items[0] ?? null);
     }
@@ -80,7 +84,7 @@ export default function App() {
   }
 
   async function startTask() {
-    if (!taskStore || !artifactWriter) {
+    if (!taskStore || !artifactWriter || !researchAdapter) {
       setError("Wutai is still initializing local storage.");
       return;
     }
@@ -122,26 +126,32 @@ export default function App() {
     await persist(nextTask);
 
     if (status === "approved") {
-      if (!artifactWriter) return;
+      if (!artifactWriter || !researchAdapter) return;
 
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        await runMockResearchAdapter(
+        await researchAdapter.run(
           nextTask,
           controller.signal,
           persist,
           artifactWriter,
         );
       } catch (error) {
+        const wasAbort = error instanceof DOMException && error.name === "AbortError";
         const failedTask = appendEvent(
-          { ...nextTask, status: "cancelled", updatedAt: new Date().toISOString() },
+          {
+            ...nextTask,
+            status: wasAbort ? "cancelled" : "failed",
+            updatedAt: new Date().toISOString(),
+          },
           {
             type: "TaskFailed",
             summary:
-              error instanceof DOMException && error.name === "AbortError"
+              wasAbort
                 ? "Task stopped by user."
-                : "Task failed before completion.",
+                : `${researchAdapter.backendName} failed before completion.`,
+            details: error instanceof Error ? error.message : String(error),
             visibility: "user",
           },
         );
@@ -175,7 +185,8 @@ export default function App() {
         </p>
         <p className="runtime-line">
           Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
-          {artifactWriter?.backendName ?? "initializing"}
+          {artifactWriter?.backendName ?? "initializing"} / Adapter:{" "}
+          {researchAdapter?.backendName ?? "initializing"}
         </p>
       </section>
 

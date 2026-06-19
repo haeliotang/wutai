@@ -5,6 +5,7 @@ import {
   type WutaiTask,
 } from "../domain/task";
 import type { ArtifactWriter } from "../artifacts/artifactWriter";
+import type { ResearchAdapter, TaskUpdateHandler } from "./researchAdapter";
 
 const sources: Array<Omit<SourceRecord, "sourceId" | "taskId">> = [
   {
@@ -81,7 +82,7 @@ ${sources.map((source) => `- [${source.title}](${source.url})`).join("\n")}
 export async function runMockResearchAdapter(
   initialTask: WutaiTask,
   signal: AbortSignal,
-  onUpdate: (task: WutaiTask) => void | Promise<void>,
+  onUpdate: TaskUpdateHandler,
   artifactWriter: ArtifactWriter,
 ) {
   let task: WutaiTask = {
@@ -186,3 +187,8 @@ export async function runMockResearchAdapter(
   await onUpdate(task);
   return task;
 }
+
+export const mockResearchAdapter: ResearchAdapter = {
+  backendName: "Mock research adapter",
+  run: runMockResearchAdapter,
+};

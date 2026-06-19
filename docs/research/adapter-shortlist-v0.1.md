@@ -13,7 +13,7 @@ contract.
 | Desktop shell | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) | Apache-2.0 | Mature desktop shell with Rust backend and web frontend. |
 | UI | [facebook/react](https://github.com/facebook/react) | MIT | Mature UI library and ecosystem. |
 | Local storage | [SQLite](https://github.com/sqlite/sqlite) through [tauri-plugin-sql](https://github.com/tauri-apps/plugins-workspace/tree/v2/plugins/sql) | SQLite upstream uses public domain style terms; Tauri SQL plugin uses MIT or MIT/Apache-2.0 terms | Local durable storage for task, event, permission, and artifact metadata without rebuilding database infrastructure. |
-| Deep research runtime | [assafelovic/gpt-researcher](https://github.com/assafelovic/gpt-researcher) | Apache-2.0 | Mature open-source deep research agent that maps directly to the v0.1 core scenario. |
+| Deep research runtime | [assafelovic/gpt-researcher](https://github.com/assafelovic/gpt-researcher) | Apache-2.0 | Mature open-source deep research agent that maps directly to the v0.1 core scenario; Wutai uses it through an optional Python sidecar instead of rebuilding research orchestration. |
 
 ## Hold for v0.2+
 
