@@ -1,0 +1,53 @@
+# Wutai Agent Guidance
+
+## Product Boundary
+
+Wutai is a task-first personal computer agent shell for non-programmers. Keep
+the user-facing surface focused on tasks, permissions, progress, evidence, and
+artifacts. Do not expose MCP, skills, provider settings, terminal output, or
+tool traces as primary UX unless the task explicitly targets expert mode.
+
+## Engineering Boundary
+
+Prefer adapter-first integration over rebuilding existing agent infrastructure.
+When possible, wrap external runtimes behind a Wutai-owned event contract:
+
+- `TaskStarted`
+- `TaskStepUpdated`
+- `PermissionRequested`
+- `HumanConfirmationNeeded`
+- `ArtifactCreated`
+- `ToolLogAdded`
+- `TaskCompleted`
+- `TaskFailed`
+
+Backend capabilities must remain swappable. Do not bind the product model to a
+single provider, model, or agent runtime.
+
+## Safety Boundary
+
+Do not describe Wutai as "fully taking over the computer" without also stating
+the control boundary. The intended model is a permissioned computer agent:
+observable by default, scoped by task, stoppable by the user, and auditable
+after execution.
+
+High-risk actions require explicit confirmation:
+
+- Sending messages, email, or posts.
+- Deleting, overwriting, moving, or publishing files.
+- Installing software or changing system settings.
+- Making purchases or payments.
+- Sharing private data with external services.
+
+## Documentation Standard
+
+For product or architecture updates, include acceptance criteria before
+implementation claims. Separate:
+
+- implemented behavior
+- planned behavior
+- demo-only behavior
+- external runtime capability
+
+Do not overclaim that an adapter capability is available until there is code,
+configuration, and a runnable verification path in this repo.

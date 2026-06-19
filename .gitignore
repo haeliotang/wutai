@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+target/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+*.log
+logs/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Wutai local state
+.wutai/
+artifacts/
+tmp/
