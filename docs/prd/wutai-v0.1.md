@@ -237,7 +237,7 @@ contracts.
 | Desktop shell | Tauri | Mature open-source desktop shell with lightweight local app model. |
 | UI | React + TypeScript | Mature UI ecosystem and fast iteration. |
 | Local storage | SQLite via Tauri SQL plugin | Local, durable task and audit storage without rebuilding database infrastructure. |
-| Research runtime | GPT Researcher sidecar | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX and permission model, not the research engine. |
+| Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
 | Computer use | Not required in v0.1 | Add later through CUA or Agent-S after stronger safety controls. |

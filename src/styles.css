@@ -257,6 +257,7 @@ textarea {
 .plan-section,
 .timeline-section,
 .permission-box,
+.research-setup,
 .artifact-section {
   border: 1px solid #2f332c;
   border-radius: 8px;
@@ -284,6 +285,88 @@ textarea {
   margin-top: 10px;
   color: #d4d1c5;
   line-height: 1.6;
+}
+
+.research-setup {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.research-setup p {
+  color: #d4d1c5;
+  line-height: 1.6;
+}
+
+.research-setup-ready {
+  border-color: #3c6a36;
+}
+
+.research-setup-blocked {
+  border-color: #6f5b22;
+  background: #120f07;
+}
+
+.preflight-checks {
+  display: grid;
+  gap: 8px;
+}
+
+.preflight-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-height: 42px;
+  border-bottom: 1px solid #20241e;
+  padding-bottom: 8px;
+}
+
+.preflight-row div {
+  display: grid;
+  gap: 4px;
+}
+
+.preflight-row strong {
+  color: #f4f1e8;
+  font-size: 13px;
+}
+
+.preflight-row span {
+  color: #b8b6aa;
+  line-height: 1.45;
+}
+
+.preflight-status {
+  align-self: start;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.preflight-pass {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.preflight-fail {
+  border-color: #ffb085;
+  color: #ffb085;
+}
+
+.preflight-warning {
+  border-color: #e7d37a;
+  color: #e7d37a;
+}
+
+.preflight-fixes {
+  margin: 0;
+  padding-left: 22px;
+  color: #d4d1c5;
+  line-height: 1.7;
 }
 
 .permission-actions {

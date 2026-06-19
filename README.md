@@ -120,6 +120,11 @@ VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher npm run tauri dev
 Without `VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher`, Wutai keeps using the
 offline mock adapter for local development and e2e tests.
 
+When the GPT Researcher adapter is enabled, Wutai runs a startup setup check
+for Python, the sidecar script, the `gpt-researcher` package, and the required
+API keys. If setup is incomplete, Wutai blocks new real research tasks and shows
+the missing steps in the app.
+
 Build the frontend:
 
 ```bash
@@ -136,7 +141,8 @@ npm run test:e2e
 
 This repository contains the first runnable Wutai shell scaffold. It includes
 task creation, task-scoped permission, local persistence, artifact writing, an
-offline mock research adapter, and an optional GPT Researcher sidecar boundary.
+offline mock research adapter, and an optional GPT Researcher sidecar with
+setup preflight.
 It does not yet implement browser-use, Codex app-server integration, full
 computer-use control, voice, or production packaging.
 

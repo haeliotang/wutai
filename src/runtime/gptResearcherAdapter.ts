@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ArtifactRecord, SourceRecord, WutaiTask } from "../domain/task";
 import { appendEvent } from "../domain/task";
-import type { ResearchAdapter, TaskUpdateHandler } from "./researchAdapter";
+import type {
+  ResearchAdapter,
+  ResearchPreflight,
+  TaskUpdateHandler,
+} from "./researchAdapter";
 
 interface GptResearcherSource {
   title?: string;
@@ -23,6 +27,10 @@ function assertNotAborted(signal: AbortSignal) {
 
 export const gptResearcherAdapter: ResearchAdapter = {
   backendName: "GPT Researcher sidecar",
+
+  async preflight() {
+    return invoke<ResearchPreflight>("check_gpt_researcher");
+  },
 
   async run(
     initialTask: WutaiTask,

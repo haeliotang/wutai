@@ -190,5 +190,15 @@ export async function runMockResearchAdapter(
 
 export const mockResearchAdapter: ResearchAdapter = {
   backendName: "Mock research adapter",
+
+  async preflight() {
+    return {
+      ready: true,
+      summary: "Offline research preview is ready.",
+      checks: [],
+      fixes: [],
+    };
+  },
+
   run: runMockResearchAdapter,
 };

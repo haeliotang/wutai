@@ -5,6 +5,8 @@ test("runs the v0.1 mock research task lifecycle", async ({ page }) => {
 
   await expect(page.getByText("WUTAI / OBSERVE MODE")).toBeVisible();
   await expect(page.getByRole("button", { name: "Create plan" })).toBeVisible();
+  await expect(page.getByText("Adapter: Mock research adapter")).toBeVisible();
+  await expect(page.getByLabel("Research setup")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Create plan" }).click();
 

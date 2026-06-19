@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createArtifactWriter, type ArtifactWriter } from "./artifacts/artifactWriter";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
 import { createResearchAdapter } from "./runtime/createResearchAdapter";
-import type { ResearchAdapter } from "./runtime/researchAdapter";
+import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
@@ -35,6 +35,9 @@ export default function App() {
   const [taskStore, setTaskStore] = useState<TaskStore | null>(null);
   const [artifactWriter, setArtifactWriter] = useState<ArtifactWriter | null>(null);
   const [researchAdapter, setResearchAdapter] = useState<ResearchAdapter | null>(null);
+  const [researchPreflight, setResearchPreflight] =
+    useState<ResearchPreflight | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -45,10 +48,12 @@ export default function App() {
       const writer = createArtifactWriter();
       const adapter = createResearchAdapter();
       const items = await store.list();
+      const preflight = await runPreflight(adapter);
       if (!active) return;
       setTaskStore(store);
       setArtifactWriter(writer);
       setResearchAdapter(adapter);
+      setResearchPreflight(preflight);
       setTasks(items);
       setActiveTask(items[0] ?? null);
     }
@@ -62,6 +67,35 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  async function runPreflight(adapter: ResearchAdapter): Promise<ResearchPreflight> {
+    try {
+      return await adapter.preflight();
+    } catch (error) {
+      return {
+        ready: false,
+        summary: "Wutai could not check the research setup.",
+        checks: [
+          {
+            key: "preflight",
+            label: "Research setup",
+            status: "fail",
+            message: "The setup check did not finish.",
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        ],
+        fixes: ["Restart Wutai and run the setup check again."],
+      };
+    }
+  }
+
+  async function refreshResearchSetup() {
+    if (!researchAdapter) return;
+
+    setPreflightLoading(true);
+    setResearchPreflight(await runPreflight(researchAdapter));
+    setPreflightLoading(false);
+  }
 
   const pendingPermission = activeTask?.permissions.find(
     (permission) => permission.status === "pending",
@@ -86,6 +120,16 @@ export default function App() {
   async function startTask() {
     if (!taskStore || !artifactWriter || !researchAdapter) {
       setError("Wutai is still initializing local storage.");
+      return;
+    }
+
+    if (!researchPreflight || preflightLoading) {
+      setError("Wutai is still checking the research setup.");
+      return;
+    }
+
+    if (!researchPreflight.ready) {
+      setError(researchPreflight.summary);
       return;
     }
 
@@ -174,6 +218,9 @@ export default function App() {
     setActiveTask(null);
   }
 
+  const shouldShowResearchSetup =
+    researchPreflight !== null && researchPreflight.checks.length > 0;
+
   return (
     <main className="app-shell">
       <section className="hero-console">
@@ -251,6 +298,49 @@ export default function App() {
             </button>
           </div>
           {error && <p className="error-text">{error}</p>}
+
+          {shouldShowResearchSetup && (
+            <section
+              className={
+                researchPreflight.ready
+                  ? "research-setup research-setup-ready"
+                  : "research-setup research-setup-blocked"
+              }
+              aria-label="Research setup"
+            >
+              <div className="panel-header">
+                <h2>Research setup</h2>
+                <button
+                  type="button"
+                  onClick={refreshResearchSetup}
+                  disabled={preflightLoading}
+                >
+                  {preflightLoading ? "Checking" : "Recheck"}
+                </button>
+              </div>
+              <p>{researchPreflight.summary}</p>
+              <div className="preflight-checks">
+                {researchPreflight.checks.map((check) => (
+                  <div className="preflight-row" key={check.key}>
+                    <span className={`preflight-status preflight-${check.status}`}>
+                      {check.status}
+                    </span>
+                    <div>
+                      <strong>{check.label}</strong>
+                      <span>{check.message}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {researchPreflight.fixes.length > 0 && (
+                <ul className="preflight-fixes">
+                  {researchPreflight.fixes.map((fix) => (
+                    <li key={fix}>{fix}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {activeTask ? (
             <div className="task-detail">
