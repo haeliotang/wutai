@@ -85,4 +85,4 @@ already been implemented.
 
 ## License
 
-TBD. Do not assume an open-source license until a `LICENSE` file is added.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
