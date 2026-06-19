@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, process::Command};
-use tauri::{AppHandle, Manager};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    io::Read,
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +45,8 @@ struct GptResearcherRunOutput {
     report: String,
     sources: Vec<GptResearcherSource>,
     audit: serde_json::Value,
+    #[serde(default)]
+    logs: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -58,6 +69,12 @@ struct ResearchPreflight {
     python_path: Option<String>,
     script_path: Option<String>,
     package_version: Option<String>,
+}
+
+#[derive(Default)]
+struct SidecarRegistry {
+    processes: Mutex<HashMap<String, Arc<Mutex<Child>>>>,
+    cancelled: Mutex<HashSet<String>>,
 }
 
 fn preflight_check(
@@ -166,6 +183,61 @@ fn python_package_version(python_path: &str, package_name: &str) -> Result<Strin
     command_text_output(Command::new(python_path).arg("-c").arg(format!(
         "from importlib import metadata; print(metadata.version('{package_name}'))"
     )))
+}
+
+fn read_pipe_to_string<R>(mut pipe: R) -> thread::JoinHandle<Result<String, String>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut output = String::new();
+        pipe.read_to_string(&mut output)
+            .map_err(|error| error.to_string())?;
+        Ok(output)
+    })
+}
+
+fn wait_for_child(child: &Arc<Mutex<Child>>) -> Result<std::process::ExitStatus, String> {
+    loop {
+        {
+            let mut child = child.lock().map_err(|error| error.to_string())?;
+            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                return Ok(status);
+            }
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn collect_reader_output(
+    handle: thread::JoinHandle<Result<String, String>>,
+) -> Result<String, String> {
+    handle
+        .join()
+        .map_err(|_| "Unable to join sidecar output reader.".to_string())?
+}
+
+fn sidecar_log_lines(stderr: &str) -> Vec<String> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(80)
+        .map(|line| {
+            let mut characters = line.chars();
+            let truncated: String = characters.by_ref().take(497).collect();
+            if characters.next().is_some() {
+                format!("{truncated}...")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }
 
 fn artifact_dir(app: &AppHandle, task_id: &str) -> Result<PathBuf, String> {
@@ -347,12 +419,67 @@ fn check_gpt_researcher() -> ResearchPreflight {
 }
 
 #[tauri::command]
-fn run_gpt_researcher(input: GptResearcherRunInput) -> Result<GptResearcherRunOutput, String> {
+fn cancel_gpt_researcher(
+    state: State<'_, SidecarRegistry>,
+    task_id: String,
+) -> Result<bool, String> {
+    state
+        .cancelled
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(task_id.clone());
+
+    let child = state
+        .processes
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&task_id)
+        .cloned();
+
+    if let Some(child) = child {
+        let mut child = child.lock().map_err(|error| error.to_string())?;
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(false);
+        }
+
+        child.kill().map_err(|error| error.to_string())?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn run_gpt_researcher(
+    state: State<'_, SidecarRegistry>,
+    input: GptResearcherRunInput,
+) -> Result<GptResearcherRunOutput, String> {
     let script_path = gpt_researcher_adapter_script()?;
     let mut errors = Vec::new();
+    if state
+        .processes
+        .lock()
+        .map_err(|error| error.to_string())?
+        .contains_key(&input.task_id)
+    {
+        return Err("A GPT Researcher sidecar is already running for this task.".to_string());
+    }
 
     for python_path in gpt_researcher_python_candidates() {
-        let output = Command::new(&python_path)
+        if state
+            .cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(&input.task_id)
+        {
+            return Err("GPT Researcher task was cancelled.".to_string());
+        }
+
+        let mut child = match Command::new(&python_path)
             .arg(&script_path)
             .arg("--query")
             .arg(&input.query)
@@ -362,28 +489,76 @@ fn run_gpt_researcher(input: GptResearcherRunInput) -> Result<GptResearcherRunOu
             .arg(&input.tone)
             .arg("--task-id")
             .arg(&input.task_id)
-            .output();
-
-        match output {
-            Ok(output) if output.status.success() => {
-                return serde_json::from_slice(&output.stdout).map_err(|error| {
-                    format!("GPT Researcher adapter returned invalid JSON: {error}")
-                });
-            }
-            Ok(output) => {
-                let mut message = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                if message.is_empty() {
-                    message = format!(
-                        "GPT Researcher adapter exited with status {}",
-                        output.status
-                    );
-                }
-                errors.push(format!("{python_path}: {message}"));
-            }
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
             Err(error) => {
-                errors.push(format!("{python_path}: {error}"));
+                errors.push(format!("Unable to launch {python_path}: {error}"));
+                continue;
             }
+        };
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Unable to capture GPT Researcher stdout.".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Unable to capture GPT Researcher stderr.".to_string())?;
+        let stdout_reader = read_pipe_to_string(stdout);
+        let stderr_reader = read_pipe_to_string(stderr);
+        let child = Arc::new(Mutex::new(child));
+
+        {
+            let mut processes = state.processes.lock().map_err(|error| error.to_string())?;
+            if processes.contains_key(&input.task_id) {
+                let _ = child.lock().map_err(|error| error.to_string())?.kill();
+                return Err(
+                    "A GPT Researcher sidecar is already running for this task.".to_string()
+                );
+            }
+            processes.insert(input.task_id.clone(), child.clone());
         }
+
+        let status = wait_for_child(&child);
+
+        state
+            .processes
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(&input.task_id);
+
+        let was_cancelled = state
+            .cancelled
+            .lock()
+            .map_err(|error| error.to_string())?
+            .remove(&input.task_id);
+
+        let stdout = collect_reader_output(stdout_reader)?;
+        let stderr = collect_reader_output(stderr_reader)?;
+
+        if was_cancelled {
+            return Err("GPT Researcher task was cancelled.".to_string());
+        }
+
+        let status = status?;
+        if status.success() {
+            let mut output: GptResearcherRunOutput =
+                serde_json::from_str(&stdout).map_err(|error| {
+                    format!("GPT Researcher adapter returned invalid JSON: {error}")
+                })?;
+            output.logs = sidecar_log_lines(&stderr);
+            return Ok(output);
+        }
+
+        let mut message = stderr.trim().to_string();
+        if message.is_empty() {
+            message = format!("GPT Researcher adapter exited with status {status}");
+        }
+        errors.push(format!("{python_path}: {message}"));
     }
 
     Err(errors.join("\n"))
@@ -403,12 +578,14 @@ pub fn run() {
     }];
 
     tauri::Builder::default()
+        .manage(SidecarRegistry::default())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:wutai.db", migrations)
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            cancel_gpt_researcher,
             check_gpt_researcher,
             write_task_artifacts,
             run_gpt_researcher

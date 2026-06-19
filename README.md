@@ -123,7 +123,9 @@ offline mock adapter for local development and e2e tests.
 When the GPT Researcher adapter is enabled, Wutai runs a startup setup check
 for Python, the sidecar script, the `gpt-researcher` package, and the required
 API keys. If setup is incomplete, Wutai blocks new real research tasks and shows
-the missing steps in the app.
+the missing steps in the app. While a real research task is running, Stop asks
+Tauri to terminate the Python sidecar process for that task. Sidecar stderr logs
+are stored as expert-only task events and stay hidden from the default timeline.
 
 Build the frontend:
 

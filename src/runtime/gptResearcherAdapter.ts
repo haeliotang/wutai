@@ -17,12 +17,17 @@ interface GptResearcherRunOutput {
   report: string;
   sources: GptResearcherSource[];
   audit: unknown;
+  logs?: string[];
 }
 
 function assertNotAborted(signal: AbortSignal) {
   if (signal.aborted) {
     throw new DOMException("Task cancelled", "AbortError");
   }
+}
+
+function expertLogSummary(log: string) {
+  return log.length > 160 ? `${log.slice(0, 157)}...` : log;
 }
 
 export const gptResearcherAdapter: ResearchAdapter = {
@@ -38,6 +43,21 @@ export const gptResearcherAdapter: ResearchAdapter = {
     onUpdate: TaskUpdateHandler,
     artifactWriter,
   ) {
+    const cancelSidecar = () => {
+      void invoke<boolean>("cancel_gpt_researcher", {
+        taskId: initialTask.taskId,
+      }).catch((error) => {
+        console.error("Failed to cancel GPT Researcher sidecar", error);
+      });
+    };
+
+    signal.addEventListener("abort", cancelSidecar, { once: true });
+    if (signal.aborted) {
+      cancelSidecar();
+      signal.removeEventListener("abort", cancelSidecar);
+      throw new DOMException("Task cancelled", "AbortError");
+    }
+
     let task = appendEvent(
       {
         ...initialTask,
@@ -63,16 +83,35 @@ export const gptResearcherAdapter: ResearchAdapter = {
     });
     await onUpdate(task);
 
-    const result = await invoke<GptResearcherRunOutput>("run_gpt_researcher", {
-      input: {
-        taskId: task.taskId,
-        query: task.userRequest,
-        reportType: "research_report",
-        tone: "objective",
-      },
-    });
+    let result: GptResearcherRunOutput;
+    try {
+      result = await invoke<GptResearcherRunOutput>("run_gpt_researcher", {
+        input: {
+          taskId: task.taskId,
+          query: task.userRequest,
+          reportType: "research_report",
+          tone: "objective",
+        },
+      });
+    } catch (error) {
+      if (signal.aborted) {
+        throw new DOMException("Task cancelled", "AbortError");
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      signal.removeEventListener("abort", cancelSidecar);
+    }
 
     assertNotAborted(signal);
+
+    for (const log of result.logs ?? []) {
+      task = appendEvent(task, {
+        type: "ToolLogAdded",
+        summary: `GPT Researcher sidecar: ${expertLogSummary(log)}`,
+        details: log,
+        visibility: "expert",
+      });
+    }
 
     const createdAt = new Date().toISOString();
     const sourceRecords: SourceRecord[] = result.sources.map((source, index) => ({
@@ -116,6 +155,7 @@ export const gptResearcherAdapter: ResearchAdapter = {
             adapter: "gpt-researcher",
             generatedAt: createdAt,
             sidecarAudit: result.audit,
+            sidecarLogs: result.logs ?? [],
           },
           null,
           2,
