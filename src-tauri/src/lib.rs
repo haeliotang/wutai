@@ -97,13 +97,57 @@ struct SidecarRegistry {
     cancelled: Mutex<HashSet<String>>,
 }
 
-trait ProviderSecretStore {
+trait ProviderSecretStore: Send + Sync {
     fn read(&self, account: &str) -> Result<Option<String>, String>;
     fn save(&self, account: &str, value: Option<&str>) -> Result<(), String>;
     fn clear(&self, account: &str) -> Result<(), String>;
 }
 
 struct SystemKeyringStore;
+
+struct ResearchProviderState {
+    store: Arc<dyn ProviderSecretStore>,
+    environment_keys: HashMap<String, String>,
+}
+
+impl ResearchProviderState {
+    fn new(store: Arc<dyn ProviderSecretStore>, environment_keys: HashMap<String, String>) -> Self {
+        Self {
+            store,
+            environment_keys,
+        }
+    }
+
+    fn configured_key(&self, account: &str, env_name: &str) -> Result<Option<String>, String> {
+        configured_key_from_sources(
+            self.store.read(account),
+            self.environment_keys.get(env_name).cloned(),
+        )
+    }
+
+    fn key_configuration_source(
+        &self,
+        account: &str,
+        env_name: &str,
+    ) -> Result<Option<&'static str>, String> {
+        key_configuration_source_from_sources(
+            self.store.read(account),
+            self.environment_keys.get(env_name).cloned(),
+        )
+    }
+}
+
+impl Default for ResearchProviderState {
+    fn default() -> Self {
+        let environment_keys = ["OPENAI_API_KEY", "TAVILY_API_KEY"]
+            .into_iter()
+            .filter_map(|name| {
+                normalize_secret(std::env::var(name).ok()).map(|value| (name.to_string(), value))
+            })
+            .collect();
+        Self::new(Arc::new(SystemKeyringStore), environment_keys)
+    }
+}
 
 impl ProviderSecretStore for SystemKeyringStore {
     fn read(&self, account: &str) -> Result<Option<String>, String> {
@@ -268,52 +312,16 @@ fn key_configuration_source_from_sources(
     Ok(None)
 }
 
-fn configured_key_with_store(
-    store: &impl ProviderSecretStore,
-    account: &str,
-    env_name: &str,
-) -> Result<Option<String>, String> {
-    configured_key_from_sources(store.read(account), std::env::var(env_name).ok())
-}
-
-fn key_configuration_source_with_store(
-    store: &impl ProviderSecretStore,
-    account: &str,
-    env_name: &str,
-) -> Result<Option<&'static str>, String> {
-    key_configuration_source_from_sources(store.read(account), std::env::var(env_name).ok())
-}
-
-fn configured_key(account: &str, env_name: &str) -> Result<Option<String>, String> {
-    configured_key_with_store(&SystemKeyringStore, account, env_name)
-}
-
-fn key_configuration_source(account: &str, env_name: &str) -> Result<Option<&'static str>, String> {
-    key_configuration_source_with_store(&SystemKeyringStore, account, env_name)
-}
-
-fn provider_setup_state_with_store(
-    store: &impl ProviderSecretStore,
-) -> Result<ResearchProviderSetup, String> {
+fn provider_setup_state(provider: &ResearchProviderState) -> Result<ResearchProviderSetup, String> {
     Ok(ResearchProviderSetup {
-        openai_key_configured: configured_key_with_store(
-            store,
-            OPENAI_KEY_ACCOUNT,
-            "OPENAI_API_KEY",
-        )?
-        .is_some(),
-        tavily_key_configured: configured_key_with_store(
-            store,
-            TAVILY_KEY_ACCOUNT,
-            "TAVILY_API_KEY",
-        )?
-        .is_some(),
+        openai_key_configured: provider
+            .configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?
+            .is_some(),
+        tavily_key_configured: provider
+            .configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?
+            .is_some(),
         secret_store: "system keychain".to_string(),
     })
-}
-
-fn provider_setup_state() -> Result<ResearchProviderSetup, String> {
-    provider_setup_state_with_store(&SystemKeyringStore)
 }
 
 fn sanitize_path_segment(value: &str) -> String {
@@ -498,30 +506,37 @@ fn write_task_artifacts(
 }
 
 #[tauri::command]
-fn get_research_provider_setup() -> Result<ResearchProviderSetup, String> {
-    provider_setup_state()
+fn get_research_provider_setup(
+    provider: State<'_, ResearchProviderState>,
+) -> Result<ResearchProviderSetup, String> {
+    provider_setup_state(provider.inner())
 }
 
 #[tauri::command]
 fn save_research_provider_setup(
+    provider: State<'_, ResearchProviderState>,
     input: ResearchProviderSetupInput,
 ) -> Result<ResearchProviderSetup, String> {
-    let store = SystemKeyringStore;
-    store.save(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
-    store.save(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
-    provider_setup_state()
+    provider
+        .store
+        .save(OPENAI_KEY_ACCOUNT, input.openai_api_key.as_deref())?;
+    provider
+        .store
+        .save(TAVILY_KEY_ACCOUNT, input.tavily_api_key.as_deref())?;
+    provider_setup_state(provider.inner())
 }
 
 #[tauri::command]
-fn clear_research_provider_setup() -> Result<ResearchProviderSetup, String> {
-    let store = SystemKeyringStore;
-    store.clear(OPENAI_KEY_ACCOUNT)?;
-    store.clear(TAVILY_KEY_ACCOUNT)?;
-    provider_setup_state()
+fn clear_research_provider_setup(
+    provider: State<'_, ResearchProviderState>,
+) -> Result<ResearchProviderSetup, String> {
+    provider.store.clear(OPENAI_KEY_ACCOUNT)?;
+    provider.store.clear(TAVILY_KEY_ACCOUNT)?;
+    provider_setup_state(provider.inner())
 }
 
 #[tauri::command]
-fn check_gpt_researcher() -> ResearchPreflight {
+fn check_gpt_researcher(provider: State<'_, ResearchProviderState>) -> ResearchPreflight {
     let mut checks = Vec::new();
     let mut fixes = Vec::new();
     let mut python_path = None;
@@ -608,7 +623,7 @@ fn check_gpt_researcher() -> ResearchPreflight {
         }
     }
 
-    match key_configuration_source(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY") {
+    match provider.key_configuration_source(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY") {
         Ok(Some(source)) => checks.push(preflight_check(
             "openai_api_key",
             "Model access",
@@ -638,7 +653,7 @@ fn check_gpt_researcher() -> ResearchPreflight {
         }
     }
 
-    match key_configuration_source(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY") {
+    match provider.key_configuration_source(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY") {
         Ok(Some(source)) => checks.push(preflight_check(
             "tavily_api_key",
             "Web search",
@@ -695,12 +710,13 @@ fn cancel_gpt_researcher(
 #[tauri::command]
 fn run_gpt_researcher(
     state: State<'_, SidecarRegistry>,
+    provider: State<'_, ResearchProviderState>,
     input: GptResearcherRunInput,
 ) -> Result<GptResearcherRunOutput, String> {
     let script_path = gpt_researcher_adapter_script()?;
     let mut errors = Vec::new();
-    let openai_key = configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
-    let tavily_key = configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
+    let openai_key = provider.configured_key(OPENAI_KEY_ACCOUNT, "OPENAI_API_KEY")?;
+    let tavily_key = provider.configured_key(TAVILY_KEY_ACCOUNT, "TAVILY_API_KEY")?;
     if state.contains(&input.task_id)? {
         return Err("A GPT Researcher sidecar is already running for this task.".to_string());
     }
@@ -803,6 +819,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(SidecarRegistry::default())
+        .manage(ResearchProviderState::default())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:wutai.db", migrations)
@@ -824,6 +841,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use tauri::{
+        ipc::{CallbackFn, InvokeBody},
+        test::{
+            get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
+        },
+        webview::InvokeRequest,
+        App, WebviewWindow, WebviewWindowBuilder,
+    };
 
     #[derive(Default)]
     struct MemorySecretStore {
@@ -857,6 +883,55 @@ mod tests {
                 .remove(account);
             Ok(())
         }
+    }
+
+    fn ipc_test_app(
+        provider: ResearchProviderState,
+        registry: SidecarRegistry,
+    ) -> App<MockRuntime> {
+        mock_builder()
+            .manage(provider)
+            .manage(registry)
+            .invoke_handler(tauri::generate_handler![
+                cancel_gpt_researcher,
+                check_gpt_researcher,
+                clear_research_provider_setup,
+                get_research_provider_setup,
+                save_research_provider_setup
+            ])
+            .build(mock_context(noop_assets()))
+            .unwrap()
+    }
+
+    fn ipc_webview(app: &App<MockRuntime>) -> WebviewWindow<MockRuntime> {
+        WebviewWindowBuilder::new(app, "main", Default::default())
+            .build()
+            .unwrap()
+    }
+
+    fn invoke_json(
+        webview: &WebviewWindow<MockRuntime>,
+        command: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        let url = if cfg!(any(windows, target_os = "android")) {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        };
+        get_ipc_response(
+            webview,
+            InvokeRequest {
+                cmd: command.to_string(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: url.parse().unwrap(),
+                body: InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .map(|response| response.deserialize::<serde_json::Value>().unwrap())
     }
 
     #[test]
@@ -933,6 +1008,79 @@ mod tests {
             .unwrap_err(),
             "keychain unavailable"
         );
+    }
+
+    #[test]
+    fn provider_setup_and_preflight_commands_work_through_tauri_ipc() {
+        let store = Arc::new(MemorySecretStore::default());
+        let provider = ResearchProviderState::new(store.clone(), HashMap::new());
+        let app = ipc_test_app(provider, SidecarRegistry::default());
+        let webview = ipc_webview(&app);
+
+        let saved = invoke_json(
+            &webview,
+            "save_research_provider_setup",
+            json!({
+                "input": {
+                    "openaiApiKey": "model-secret",
+                    "tavilyApiKey": "search-secret"
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(saved["openaiKeyConfigured"], true);
+        assert_eq!(saved["tavilyKeyConfigured"], true);
+        assert_eq!(
+            store.read(OPENAI_KEY_ACCOUNT).unwrap().as_deref(),
+            Some("model-secret")
+        );
+
+        let preflight = invoke_json(&webview, "check_gpt_researcher", json!({})).unwrap();
+        let checks = preflight["checks"].as_array().unwrap();
+        for key in ["openai_api_key", "tavily_api_key"] {
+            let check = checks.iter().find(|check| check["key"] == key).unwrap();
+            assert_eq!(check["status"], "pass");
+            assert_eq!(check["detail"], "Configured through Wutai setup.");
+        }
+
+        let cleared = invoke_json(&webview, "clear_research_provider_setup", json!({})).unwrap();
+        assert_eq!(cleared["openaiKeyConfigured"], false);
+        assert_eq!(cleared["tavilyKeyConfigured"], false);
+        assert_eq!(store.read(OPENAI_KEY_ACCOUNT).unwrap(), None);
+        assert_eq!(store.read(TAVILY_KEY_ACCOUNT).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_command_kills_a_registered_process_through_tauri_ipc() {
+        let child = Arc::new(Mutex::new(
+            Command::new("sh")
+                .arg("-c")
+                .arg("sleep 30")
+                .spawn()
+                .unwrap(),
+        ));
+        let registry = SidecarRegistry::default();
+        registry
+            .register("ipc-running-task", child.clone())
+            .unwrap();
+        let provider =
+            ResearchProviderState::new(Arc::new(MemorySecretStore::default()), HashMap::new());
+        let app = ipc_test_app(provider, registry);
+        let webview = ipc_webview(&app);
+
+        let cancelled = invoke_json(
+            &webview,
+            "cancel_gpt_researcher",
+            json!({ "taskId": "ipc-running-task" }),
+        )
+        .unwrap();
+        assert_eq!(cancelled, true);
+        child.lock().unwrap().wait().unwrap();
+
+        let registry = app.state::<SidecarRegistry>();
+        registry.remove("ipc-running-task").unwrap();
+        assert!(registry.take_cancelled("ipc-running-task").unwrap());
     }
 
     #[test]

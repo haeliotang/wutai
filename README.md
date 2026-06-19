@@ -143,15 +143,16 @@ Run the core scenario e2e test:
 npm run test:e2e
 ```
 
-Run the desktop command-logic tests:
+Run the desktop command and IPC tests:
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-These Rust tests use an in-memory credential store, never the user's system
-keychain. They cover provider-key precedence and GPT Researcher process
-cancellation; Playwright covers the default offline task flow.
+These Rust tests use Tauri's official mock runtime and an in-memory credential
+store, never the user's system keychain. They cover provider-key precedence,
+setup preflight and process cancellation through the Tauri invoke handler;
+Playwright covers the default offline task flow.
 
 ## Repository Status
 
