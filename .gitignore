@@ -29,6 +29,8 @@ venv/
 # Logs
 *.log
 logs/
+test-results/
+playwright-report/
 
 # OS/editor
 .DS_Store
@@ -40,3 +42,4 @@ Thumbs.db
 .wutai/
 artifacts/
 tmp/
+src-tauri/gen/

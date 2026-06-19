@@ -75,7 +75,40 @@ See:
 - [Security Model](docs/security-model.md)
 - [Persona and Voice](docs/persona-and-voice.md)
 - [Wutai v0.1 PRD](docs/prd/wutai-v0.1.md)
+- [v0.1 Scaffold Technical Design](docs/technical-design/v0.1-scaffold.md)
 - [Market Scan](docs/research/market-scan.md)
+
+## Development
+
+Prerequisites:
+
+- Node.js
+- npm
+- Rust and Cargo
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the web shell:
+
+```bash
+npm run dev
+```
+
+Run the Tauri shell:
+
+```bash
+npm run tauri dev
+```
+
+Build the frontend:
+
+```bash
+npm run build
+```
 
 ## Repository Status
 
