@@ -102,7 +102,7 @@ const DEFAULT_LOCAL_SCRIPT_COVERAGE: WorkPacketCoverage = {
   ],
   enforcement: [
     "Trace import records the boundary after execution; it does not enforce shell permissions.",
-    "Runtime-enforced CLI supervision is not implemented yet.",
+    "Runtime-enforced CLI policy supervision is not implemented in this trace-import path.",
   ],
 };
 
@@ -148,6 +148,7 @@ function artifactRole(name: string) {
   if (name === "claims.json") return "claim_ledger";
   if (name === "verification.json") return "evidence_verification";
   if (name === "trace.json") return "runtime_trace";
+  if (name === "ledger.json") return "session_ledger";
   if (name === "audit.json") return "audit_trail";
   return "supporting_artifact";
 }

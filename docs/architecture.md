@@ -181,6 +181,7 @@ understand what happened after a task completes.
 5. Research adapter.
 6. Artifact generation.
 7. Evidence Gate and audit artifact.
-8. CLI wrapper or trace importer for one external agent runtime.
-9. Credential broker for task-scoped provider access.
-10. Browser/computer-use adapters.
+8. Development CLI wrapper and trace importer for local-script sessions.
+9. CLI wrapper policy preflight and explicit allow/deny records.
+10. Credential broker for task-scoped provider access.
+11. Browser/computer-use adapters.

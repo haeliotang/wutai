@@ -10,9 +10,10 @@ auditable, stoppable, and reviewable.
 
 > Repository status: v0.2 foundation in progress. The current code implements
 > one supervised research workflow, a v0.2 work-packet manifest, and a
-> local-script trace-import wedge. It does not yet execute, sandbox, or enforce
-> permissions for arbitrary external agents, browser-control runtimes, MCP
-> tools, coding agents, or full computer-use sessions.
+> local-script trace-import and developer CLI wrapper wedge. It does not yet
+> sandbox commands, enforce a general permission broker, or supervise arbitrary
+> external agents, browser-control runtimes, MCP tools, coding agents, or full
+> computer-use sessions.
 
 ## Why This Exists
 
@@ -35,7 +36,8 @@ that records, scopes, and verifies agentic work.
 ## Current Implementation
 
 The v0.1 scaffold proves this loop with a bounded research workflow. The v0.2
-foundation extends the work-packet model with local-script trace import:
+foundation extends the work-packet model with local-script trace import and a
+developer CLI wrapper:
 
 ```text
 natural-language task
@@ -66,6 +68,9 @@ Implemented:
   coverage/blind-spot notes.
 - Local-script trace importer that turns an already-run command trace into a
   reviewable work packet without executing the command.
+- Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
+  explicitly provided local command, captures bounded stdout/stderr summaries,
+  records exit code and git-status delta, and writes a local work packet.
 
 Each completed research task writes a local work packet:
 
@@ -87,10 +92,20 @@ trace.json
 audit.json
 ```
 
+Each developer CLI wrapper run writes:
+
+```text
+manifest.json
+report.md
+trace.json
+ledger.json
+audit.json
+```
+
 Not implemented:
 
 - Runtime-enforced supervised sessions for arbitrary external agents.
-- Shell command execution under a Wutai permission broker.
+- Shell command execution under a full Wutai permission broker or sandbox.
 - MCP proxy or tool-call recorder.
 - Browser-use, Codex, Claude Code, or full computer-use supervision.
 - Cross-agent credential broker.
@@ -109,9 +124,10 @@ Desktop Supervision Console
   -> External agent runtimes and tools
 ```
 
-Current code implements the research-adapter slice and a local-script trace
-import slice of this architecture. The broader adapter/proxy layers are planned
-boundaries, not shipped runtime-enforced behavior.
+Current code implements the research-adapter slice, a local-script trace import
+slice, and a developer CLI wrapper slice of this architecture. The broader
+adapter/proxy layers are planned boundaries, not shipped runtime-enforced
+behavior.
 
 Key design documents:
 
@@ -149,6 +165,22 @@ Run the Tauri desktop shell:
 ```bash
 npm run tauri dev
 ```
+
+## Developer CLI Wrapper
+
+Run a local command through Wutai's development wrapper:
+
+```bash
+npm run wutai:run -- -- npm run test:evidence
+```
+
+The wrapper writes a work packet under `artifacts/cli/<session_id>/`. It records
+the explicit invocation, argv, working directory, exit code, bounded
+stdout/stderr summaries, a git-status delta, and artifact hashes.
+
+Boundary: this wrapper does not sandbox the process, mediate credentials, block
+network or filesystem access, or enforce a destructive-command policy. It is a
+verified local execution ledger, not a full permission broker.
 
 ## Optional Real Research Adapter
 
@@ -211,6 +243,12 @@ Run the Evidence Gate regressions:
 npm run test:evidence
 ```
 
+Run the CLI wrapper packet tests:
+
+```bash
+npm run test:wutai-run
+```
+
 Run the desktop command and IPC tests:
 
 ```bash
@@ -241,11 +279,11 @@ direction:
 
 Near-term engineering work:
 
-- Continue generalizing the work-packet manifest beyond research and imported
-  local-script traces.
+- Continue generalizing the work-packet manifest beyond research, imported
+  local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Promote the local-script trace importer into a real CLI wrapper after the
-  permission broker boundary is explicit.
+- Add policy preflight for the CLI wrapper, starting with destructive-command
+  warnings and explicit allow/deny records.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

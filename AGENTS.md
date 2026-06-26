@@ -20,8 +20,13 @@ When possible, wrap external runtimes behind a Wutai-owned event contract:
 - `TaskStarted`
 - `TaskStepUpdated`
 - `PermissionRequested`
+- `PermissionResolved`
 - `HumanConfirmationNeeded`
 - `ArtifactCreated`
+- `SourceCaptured`
+- `ToolCallCaptured`
+- `RuntimeEventCaptured`
+- `CredentialGrantRecorded`
 - `ToolLogAdded`
 - `TaskCompleted`
 - `TaskFailed`

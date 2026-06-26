@@ -27,6 +27,9 @@ Not allowed:
 - Run shell commands.
 - Modify files.
 
+The development CLI wrapper is outside the default Observe Mode UI. It runs
+only when a developer explicitly invokes `npm run wutai:run -- -- <command>`.
+
 ### Assist Mode
 
 Task-scoped mode for productive work.
@@ -81,6 +84,25 @@ These actions must be blocked unless a specific confirmation flow exists:
 - Run destructive shell commands.
 - Export audit logs or artifacts containing private local paths or sensitive
   source material.
+
+## Local Command Boundary
+
+The v0.2 developer CLI wrapper can execute an explicitly supplied local command
+and create a work packet. Its current boundary is observational:
+
+- It records argv, working directory, exit code, bounded stdout/stderr
+  summaries, git-status delta, session ledger, audit trail, and artifact
+  hashes.
+- It spawns argv directly with shell expansion disabled.
+- It does not sandbox the child process.
+- It does not block destructive commands.
+- It does not mediate environment variables, filesystem access, network access,
+  or credentials inherited from the invoking shell.
+- It does not replace the future desktop permission broker.
+
+Any product surface that exposes command execution to non-developer users must
+add explicit policy preflight, confirmation, stop/revoke behavior, and clearer
+filesystem and credential boundaries first.
 
 ## Credential Boundary
 
