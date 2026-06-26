@@ -70,7 +70,8 @@ Implemented:
   reviewable work packet without executing the command.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
-  records exit code and git-status delta, and writes a local work packet.
+  runs rule-based policy preflight, records exit code and git-status delta, and
+  writes a local work packet.
 
 Each completed research task writes a local work packet:
 
@@ -97,6 +98,7 @@ Each developer CLI wrapper run writes:
 ```text
 manifest.json
 report.md
+policy.json
 trace.json
 ledger.json
 audit.json
@@ -175,12 +177,23 @@ npm run wutai:run -- -- npm run test:evidence
 ```
 
 The wrapper writes a work packet under `artifacts/cli/<session_id>/`. It records
-the explicit invocation, argv, working directory, exit code, bounded
-stdout/stderr summaries, a git-status delta, and artifact hashes.
+the explicit invocation, argv, working directory, policy preflight decision,
+exit code, bounded stdout/stderr summaries, a git-status delta, and artifact
+hashes.
+
+Known high-risk patterns such as shell interpreter command strings, recursive
+or forced remove, privilege escalation, destructive git operations, and
+recursive permission changes are denied before execution by default. To record
+an explicit override:
+
+```bash
+npm run wutai:run -- --allow-high-risk -- sh -c "printf reviewed"
+```
 
 Boundary: this wrapper does not sandbox the process, mediate credentials, block
-network or filesystem access, or enforce a destructive-command policy. It is a
-verified local execution ledger, not a full permission broker.
+network or filesystem access, or enforce a complete destructive-command policy.
+The policy rule set is intentionally small. It is a verified local execution
+ledger, not a full permission broker.
 
 ## Optional Real Research Adapter
 
@@ -282,8 +295,8 @@ Near-term engineering work:
 - Continue generalizing the work-packet manifest beyond research, imported
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Add policy preflight for the CLI wrapper, starting with destructive-command
-  warnings and explicit allow/deny records.
+- Extend CLI policy preflight beyond the current small high-risk rule set.
+- Add desktop UI import/review for CLI wrapper packets.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

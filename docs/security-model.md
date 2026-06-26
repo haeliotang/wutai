@@ -88,14 +88,17 @@ These actions must be blocked unless a specific confirmation flow exists:
 ## Local Command Boundary
 
 The v0.2 developer CLI wrapper can execute an explicitly supplied local command
-and create a work packet. Its current boundary is observational:
+and create a work packet. Its current boundary is rule-based and incomplete:
 
-- It records argv, working directory, exit code, bounded stdout/stderr
-  summaries, git-status delta, session ledger, audit trail, and artifact
-  hashes.
+- It runs a static policy preflight before execution.
+- It denies matched high-risk rules by default, unless the caller passes
+  `--allow-high-risk`.
+- It records argv, working directory, policy decision, exit code, bounded
+  stdout/stderr summaries, git-status delta, session ledger, audit trail, and
+  artifact hashes.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
-- It does not block destructive commands.
+- It does not identify every destructive command.
 - It does not mediate environment variables, filesystem access, network access,
   or credentials inherited from the invoking shell.
 - It does not replace the future desktop permission broker.

@@ -147,6 +147,7 @@ function artifactRole(name: string) {
   if (name === "sources.json") return "source_ledger";
   if (name === "claims.json") return "claim_ledger";
   if (name === "verification.json") return "evidence_verification";
+  if (name === "policy.json") return "policy_preflight";
   if (name === "trace.json") return "runtime_trace";
   if (name === "ledger.json") return "session_ledger";
   if (name === "audit.json") return "audit_trail";

@@ -7,6 +7,7 @@ import process from "node:process";
 
 const MAX_CAPTURE_CHARS = 16_000;
 const MAX_SUMMARY_CHARS = 2_000;
+const POLICY_DENIED_EXIT_CODE = 3;
 
 function usage() {
   return `Usage:
@@ -16,13 +17,14 @@ Options:
   --output-dir <path>   Directory for generated work packets. Default: artifacts/cli
   --cwd <path>          Working directory for the wrapped command. Default: current directory
   --title <text>        Packet title
+  --allow-high-risk     Execute even when policy preflight matches high-risk rules
   --quiet               Do not mirror child stdout/stderr while running
   --help                Show this message
 
 Boundary:
   This developer wrapper executes the requested command and records a work
   packet. It does not sandbox the process, mediate credentials, or enforce a
-  full permission broker.`;
+  full permission broker. Policy preflight is rule-based and incomplete.`;
 }
 
 function parseArgs(argv) {
@@ -33,6 +35,7 @@ function parseArgs(argv) {
     outputDir: "artifacts/cli",
     cwd: process.cwd(),
     title: null,
+    allowHighRisk: false,
     quiet: false,
     help: false,
   };
@@ -41,6 +44,8 @@ function parseArgs(argv) {
     const arg = optionArgs[index];
     if (arg === "--help") {
       options.help = true;
+    } else if (arg === "--allow-high-risk") {
+      options.allowHighRisk = true;
     } else if (arg === "--quiet") {
       options.quiet = true;
     } else if (arg === "--output-dir") {
@@ -83,6 +88,142 @@ function quoteArg(arg) {
 
 function commandLine(command) {
   return command.map(quoteArg).join(" ");
+}
+
+function commandName(command) {
+  return (command[0]?.split(/[\\/]/).pop() ?? "").toLowerCase();
+}
+
+function hasRecursiveFlag(args) {
+  return args.some(
+    (arg) =>
+      arg === "--recursive" ||
+      arg === "-r" ||
+      arg === "-R" ||
+      /^-[A-Za-z]*[rR][A-Za-z]*$/.test(arg),
+  );
+}
+
+function hasForceFlag(args) {
+  return args.some(
+    (arg) =>
+      arg === "--force" ||
+      arg === "-f" ||
+      /^-[A-Za-z]*f[A-Za-z]*$/.test(arg),
+  );
+}
+
+function hasAnyArg(args, candidates) {
+  return args.some((arg) => candidates.includes(arg));
+}
+
+function assessPolicy(command, { allowHighRisk }) {
+  const name = commandName(command);
+  const args = command.slice(1);
+  const matchedRules = [];
+
+  if (["sh", "bash", "zsh", "fish", "dash"].includes(name) && args.includes("-c")) {
+    matchedRules.push({
+      ruleId: "shell_interpreter_command_string",
+      severity: "high",
+      message:
+        "Shell interpreter with -c can reintroduce shell expansion outside Wutai's argv boundary.",
+    });
+  }
+
+  if (["sudo", "su", "doas"].includes(name)) {
+    matchedRules.push({
+      ruleId: "privilege_escalation",
+      severity: "high",
+      message: "Privilege escalation commands are high risk for a local wrapper.",
+    });
+  }
+
+  if (name === "rm" && (hasRecursiveFlag(args) || hasForceFlag(args))) {
+    matchedRules.push({
+      ruleId: "destructive_remove",
+      severity: "high",
+      message: "Recursive or forced remove commands can destroy local data.",
+    });
+  }
+
+  if (
+    name === "git" &&
+    ((args[0] === "reset" && args.includes("--hard")) ||
+      (args[0] === "clean" && hasForceFlag(args)) ||
+      (args[0] === "branch" && args.includes("-D")))
+  ) {
+    matchedRules.push({
+      ruleId: "destructive_git_operation",
+      severity: "high",
+      message: "This git command can discard local work or delete refs.",
+    });
+  }
+
+  if (
+    ["chmod", "chown", "chgrp"].includes(name) &&
+    (hasRecursiveFlag(args) || hasAnyArg(args, ["-R"]))
+  ) {
+    matchedRules.push({
+      ruleId: "recursive_permission_change",
+      severity: "high",
+      message: "Recursive ownership or permission changes can damage a workspace.",
+    });
+  }
+
+  if (
+    (name === "python" || name === "python3") &&
+    args[0] === "-m" &&
+    args[1] === "http.server"
+  ) {
+    matchedRules.push({
+      ruleId: "network_listener",
+      severity: "medium",
+      message: "Starting a local network listener requires review.",
+    });
+  }
+
+  if (
+    ["npm", "pnpm", "yarn", "pip", "pip3", "brew", "cargo"].includes(name) &&
+    hasAnyArg(args, ["install", "add", "update", "upgrade"])
+  ) {
+    matchedRules.push({
+      ruleId: "dependency_install_or_update",
+      severity: "medium",
+      message: "Dependency installation or update can modify local code or tools.",
+    });
+  }
+
+  const highestSeverity = matchedRules.some((rule) => rule.severity === "high")
+    ? "high"
+    : matchedRules.some((rule) => rule.severity === "medium")
+      ? "medium"
+      : "low";
+  const decision =
+    highestSeverity === "high" && !allowHighRisk
+      ? "deny"
+      : highestSeverity === "high" && allowHighRisk
+        ? "allow_with_override"
+        : highestSeverity === "medium"
+          ? "allow_with_warnings"
+          : "allow";
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.cli_policy_preflight",
+    decision,
+    highestSeverity,
+    allowHighRisk,
+    matchedRules,
+    summary:
+      decision === "deny"
+        ? "Policy preflight denied execution before the command ran."
+        : matchedRules.length
+          ? "Policy preflight allowed execution with warnings."
+          : "Policy preflight allowed execution with no matched risk rules.",
+    limitation:
+      "This rule set is intentionally small and is not a complete shell safety policy.",
+  };
 }
 
 function sha256Hex(content) {
@@ -142,6 +283,7 @@ function artifact(taskId, name, type, content, createdAt) {
 
 function artifactRole(name) {
   if (name === "report.md") return "primary_artifact";
+  if (name === "policy.json") return "policy_preflight";
   if (name === "trace.json") return "runtime_trace";
   if (name === "ledger.json") return "session_ledger";
   if (name === "audit.json") return "audit_trail";
@@ -152,6 +294,7 @@ function buildManifest({
   task,
   artifacts,
   createdAt,
+  policy,
   command,
   commandCwd,
   startedAt,
@@ -201,11 +344,14 @@ function buildManifest({
     audit: {
       eventCount: task.events.length,
       eventTypeCounts,
-      permissionDecisionCount: 1,
-      toolCallCount: 1,
-      runtimeEventCount: 1,
+      permissionDecisionCount: task.permissions.filter(
+        (permission) => permission.status !== "pending",
+      ).length,
+      toolCallCount: eventTypeCounts.ToolCallCaptured ?? 0,
+      runtimeEventCount: eventTypeCounts.RuntimeEventCaptured ?? 0,
       credentialPurposes: [],
-      auditArtifacts: ["ledger.json", "audit.json"],
+      auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
+      policyDecision: policy.decision,
     },
     artifacts: artifacts.map((item) => ({
       artifactId: item.artifactId,
@@ -226,6 +372,7 @@ function buildManifest({
       sourcesArtifact: null,
       unsupportedItems: [
         "The wrapper records process metadata and bounded output; it does not prove the command was safe.",
+        "Policy preflight uses a small static rule set; it is not a complete shell safety policy.",
       ],
       blindSpots: [
         "No process sandbox, filesystem policy, network policy, or credential mediation is active.",
@@ -239,6 +386,7 @@ function buildManifest({
         "bounded_stdout",
         "bounded_stderr",
         "git_status_delta",
+        "policy_preflight",
         "permission_record",
         "session_ledger",
         "audit_trail",
@@ -252,8 +400,9 @@ function buildManifest({
       ],
       enforcement: [
         "The wrapper avoids shell expansion by spawning argv directly.",
-        "The explicit CLI invocation is recorded as the approval boundary.",
-        "No policy engine, sandbox, credential broker, or destructive-command blocker is implemented.",
+        "Rule-based policy preflight denies matched high-risk commands unless --allow-high-risk is supplied.",
+        "The explicit CLI invocation and policy decision are recorded as the approval boundary.",
+        "No sandbox, credential broker, or complete destructive-command policy is implemented.",
       ],
     },
     humanReview: {
@@ -263,12 +412,29 @@ function buildManifest({
   };
 }
 
-function buildReport({ task, command, commandCwd, startedAt, completedAt, exitCode, stdoutSummary, stderrSummary, touchedFiles }) {
+function buildReport({
+  task,
+  policy,
+  command,
+  commandCwd,
+  startedAt,
+  completedAt,
+  exitCode,
+  stdoutSummary,
+  stderrSummary,
+  touchedFiles,
+}) {
   return `# Wutai CLI Run Packet
 
 ## Command
 
 \`${command}\`
+
+## Policy Preflight
+
+- Decision: ${policy.decision}
+- Highest severity: ${policy.highestSeverity}
+- Matched rules: ${policy.matchedRules.length ? policy.matchedRules.map((rule) => rule.ruleId).join(", ") : "none"}
 
 ## Result
 
@@ -286,9 +452,9 @@ function buildReport({ task, command, commandCwd, startedAt, completedAt, exitCo
 ## Boundary
 
 This packet was created by the Wutai development CLI wrapper. The wrapper ran
-the requested argv directly and recorded the session. It did not sandbox the
-process, mediate credentials, block filesystem or network access, or enforce a
-destructive-command policy.
+or denied the requested argv according to a small static policy preflight. It
+did not sandbox the process, mediate credentials, block filesystem or network
+access, or enforce a complete destructive-command policy.
 
 ## Task
 
@@ -349,25 +515,74 @@ async function main() {
   const commandCwd = resolve(options.cwd);
   const outputRoot = resolve(options.outputDir);
   const commandText = commandLine(command);
-  const beforeStatus = gitStatus(commandCwd);
-  const run = await runChild(command, commandCwd, options.quiet);
-  const afterStatus = gitStatus(commandCwd);
-  const touchedFiles = statusDelta(beforeStatus, afterStatus);
+  const policy = assessPolicy(command, {
+    allowHighRisk: options.allowHighRisk,
+  });
+  const deniedByPolicy = policy.decision === "deny";
+  let touchedFiles = [];
+  let run;
+  if (deniedByPolicy) {
+    const deniedAt = new Date().toISOString();
+    run = {
+      startedAt: deniedAt,
+      completedAt: deniedAt,
+      exitCode: POLICY_DENIED_EXIT_CODE,
+      stdout: "",
+      stderr: policy.summary,
+    };
+    if (!options.quiet) {
+      console.error(policy.summary);
+      for (const rule of policy.matchedRules) {
+        console.error(`- ${rule.ruleId}: ${rule.message}`);
+      }
+      console.error("Re-run with --allow-high-risk to override this preflight.");
+    }
+  } else {
+    const beforeStatus = gitStatus(commandCwd);
+    run = await runChild(command, commandCwd, options.quiet);
+    const afterStatus = gitStatus(commandCwd);
+    touchedFiles = statusDelta(beforeStatus, afterStatus);
+  }
   const generatedAt = new Date().toISOString();
   const taskId = `cli_${Date.now().toString(36)}`;
-  const status = run.exitCode === 0 ? "completed" : "failed";
+  const policyRecord = {
+    ...policy,
+    taskId,
+    generatedAt,
+    command: commandText,
+    argv: command,
+    workingDirectory: commandCwd,
+  };
+  const status = deniedByPolicy
+    ? "cancelled"
+    : run.exitCode === 0
+      ? "completed"
+      : "failed";
   const permission = {
     requestId: `${taskId}_permission_local_script_execution`,
     taskId,
-    status: "approved",
-    types: ["local_script_execution", "artifact_write"],
+    status: deniedByPolicy ? "denied" : "approved",
+    types: ["local_script_execution"],
     scope: [
       "Run the requested argv through the Wutai developer CLI wrapper",
+      "Apply rule-based policy preflight before execution",
       "Capture bounded stdout and stderr summaries",
-      "Write a new local work packet",
       "No shell expansion",
       "No sandboxing",
       "No credential mediation",
+    ],
+    createdAt: run.startedAt,
+    resolvedAt: run.startedAt,
+  };
+  const artifactPermission = {
+    requestId: `${taskId}_permission_artifact_write`,
+    taskId,
+    status: "approved",
+    types: ["artifact_write"],
+    scope: [
+      "Write a new local work packet",
+      "Write policy, trace, ledger, audit, report, and manifest artifacts",
+      "Do not modify existing work packets",
     ],
     createdAt: run.startedAt,
     resolvedAt: run.startedAt,
@@ -376,28 +591,56 @@ async function main() {
   const stderrSummary = summarize(run.stderr);
   const events = [
     event(taskId, 1, run.startedAt, "TaskStarted", "Started Wutai CLI wrapper session.", null, "user"),
-    event(taskId, 2, run.startedAt, "PermissionRequested", "Declared local-script execution boundary.", permission.scope.join("; "), "user"),
-    event(taskId, 3, run.startedAt, "PermissionResolved", "Local-script execution boundary recorded for this invocation.", null, "user"),
-    event(taskId, 4, run.startedAt, "ToolCallCaptured", `Started command: ${commandText}`, `Working directory: ${commandCwd}`, "expert"),
-    event(taskId, 5, run.completedAt, "RuntimeEventCaptured", `Command exited with code ${run.exitCode}.`, stdoutSummary, "user"),
-    event(taskId, 6, generatedAt, "ArtifactCreated", "Saved manifest, report, trace, ledger, and audit artifacts.", null, "user"),
-    event(taskId, 7, generatedAt, run.exitCode === 0 ? "TaskCompleted" : "TaskFailed", run.exitCode === 0 ? "Wutai CLI wrapper session completed." : "Wutai CLI wrapper session failed.", stderrSummary, "user"),
+    event(taskId, 2, run.startedAt, "PermissionRequested", "Declared local-script execution and policy boundary.", permission.scope.join("; "), "user"),
+    event(
+      taskId,
+      3,
+      run.startedAt,
+      "PermissionResolved",
+      deniedByPolicy
+        ? "Policy preflight denied this invocation before execution."
+        : "Policy preflight allowed this invocation.",
+      policyRecord.summary,
+      "user",
+    ),
   ];
+  if (!deniedByPolicy) {
+    events.push(
+      event(taskId, 4, run.startedAt, "ToolCallCaptured", `Started command: ${commandText}`, `Working directory: ${commandCwd}`, "expert"),
+      event(taskId, 5, run.completedAt, "RuntimeEventCaptured", `Command exited with code ${run.exitCode}.`, stdoutSummary, "user"),
+    );
+  }
+  events.push(
+    event(taskId, events.length + 1, generatedAt, "ArtifactCreated", "Saved manifest, report, policy, trace, ledger, and audit artifacts.", null, "user"),
+    event(
+      taskId,
+      events.length + 2,
+      generatedAt,
+      deniedByPolicy || run.exitCode !== 0 ? "TaskFailed" : "TaskCompleted",
+      deniedByPolicy
+        ? "Wutai CLI wrapper session blocked by policy preflight."
+        : run.exitCode === 0
+          ? "Wutai CLI wrapper session completed."
+          : "Wutai CLI wrapper session failed.",
+      deniedByPolicy ? policyRecord.summary : stderrSummary,
+      "user",
+    ),
+  );
   const task = {
     taskId,
     title: options.title ?? `CLI run: ${commandText}`,
     userRequest: `Run and record local command: ${commandText}`,
     status,
     plan: [
-      "Record the explicit CLI invocation boundary.",
-      "Run the command with argv-based process spawning.",
+      "Run policy preflight for the explicit CLI invocation.",
+      "Run the command with argv-based process spawning if policy allows it.",
       "Capture bounded stdout, stderr, exit code, and git status delta.",
-      "Save manifest, report, trace, ledger, and audit artifacts.",
+      "Save manifest, report, policy, trace, ledger, and audit artifacts.",
     ],
     createdAt: run.startedAt,
     updatedAt: generatedAt,
     events,
-    permissions: [permission],
+    permissions: [permission, artifactPermission],
     sources: [],
     artifacts: [],
   };
@@ -411,6 +654,7 @@ async function main() {
     command: commandText,
     argv: command,
     workingDirectory: commandCwd,
+    executed: !deniedByPolicy,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     exitCode: run.exitCode,
@@ -430,36 +674,42 @@ async function main() {
     kind: "wutai.session_audit",
     taskId,
     generatedAt,
-    permissions: [permission],
+    permissions: [permission, artifactPermission],
+    policy: policyRecord,
     events,
-    toolCalls: [
-      {
-        toolCallId: `${taskId}_tool_1`,
-        kind: "local_command",
-        command: commandText,
-        argv: command,
-        workingDirectory: commandCwd,
-        startedAt: run.startedAt,
-        completedAt: run.completedAt,
-        exitCode: run.exitCode,
-        captureMode: "cli_wrapper",
-      },
-    ],
-    runtimeEvents: [
-      {
-        runtimeEventId: `${taskId}_runtime_1`,
-        type: "process_exit",
-        timestamp: run.completedAt,
-        exitCode: run.exitCode,
-        stdoutSummary,
-        stderrSummary,
-      },
-    ],
+    toolCalls: deniedByPolicy
+      ? []
+      : [
+          {
+            toolCallId: `${taskId}_tool_1`,
+            kind: "local_command",
+            command: commandText,
+            argv: command,
+            workingDirectory: commandCwd,
+            startedAt: run.startedAt,
+            completedAt: run.completedAt,
+            exitCode: run.exitCode,
+            captureMode: "cli_wrapper",
+          },
+        ],
+    runtimeEvents: deniedByPolicy
+      ? []
+      : [
+          {
+            runtimeEventId: `${taskId}_runtime_1`,
+            type: "process_exit",
+            timestamp: run.completedAt,
+            exitCode: run.exitCode,
+            stdoutSummary,
+            stderrSummary,
+          },
+        ],
     credentialGrants: [],
   };
   const artifacts = [
     artifact(taskId, "report.md", "markdown", buildReport({
       task,
+      policy: policyRecord,
       command: commandText,
       commandCwd,
       startedAt: run.startedAt,
@@ -469,6 +719,7 @@ async function main() {
       stderrSummary,
       touchedFiles,
     }), generatedAt),
+    artifact(taskId, "policy.json", "json", JSON.stringify(policyRecord, null, 2), generatedAt),
     artifact(taskId, "trace.json", "json", JSON.stringify(trace, null, 2), generatedAt),
     artifact(taskId, "ledger.json", "json", JSON.stringify(ledger, null, 2), generatedAt),
     artifact(taskId, "audit.json", "json", JSON.stringify(audit, null, 2), generatedAt),
@@ -477,6 +728,7 @@ async function main() {
     task,
     artifacts,
     createdAt: generatedAt,
+    policy: policyRecord,
     command: commandText,
     commandCwd,
     startedAt: run.startedAt,
