@@ -19,6 +19,7 @@ import {
   type SearchProvider,
 } from "./runtime/researchProviderSetup";
 import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
+import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
@@ -350,6 +351,17 @@ export default function App() {
     await persist(task);
   }
 
+  async function importLocalScriptTraceTask() {
+    if (!taskStore || !artifactWriter) {
+      setError("Wutai is still initializing local storage.");
+      return;
+    }
+
+    setError(null);
+    const task = await importLocalScriptTrace(artifactWriter);
+    await persist(task);
+  }
+
   async function resolvePermission(status: "approved" | "denied") {
     if (!activeTask || !pendingPermission) return;
 
@@ -467,8 +479,9 @@ export default function App() {
         <div className="system-line">WUTAI / OBSERVE MODE</div>
         <h1>Local trust layer for agentic work</h1>
         <p>
-          v0.1 scaffold. Supervised research sessions, task-scoped permission,
-          auditable progress, Evidence Gate checks, and local work packets.
+          v0.2 foundation. Supervised research sessions, local-script trace
+          import, task-scoped permission, Evidence Gate checks, and local work
+          packets.
         </p>
         <p className="runtime-line">
           Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
@@ -528,6 +541,9 @@ export default function App() {
               aria-label="Restore core scenario"
             >
               Core scenario
+            </button>
+            <button type="button" onClick={importLocalScriptTraceTask}>
+              Import local script trace
             </button>
             <button
               type="button"
@@ -1013,14 +1029,29 @@ export default function App() {
                 <section className="artifact-section">
                   <div className="panel-header">
                     <h2>Artifact preview</h2>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadArtifact(reportArtifact.name, reportArtifact.content)
-                      }
-                    >
-                      Download report.md
-                    </button>
+                    <div className="panel-actions">
+                      {manifestArtifact && !evidenceVerification && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadArtifact(
+                              manifestArtifact.name,
+                              manifestArtifact.content,
+                            )
+                          }
+                        >
+                          Download manifest
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadArtifact(reportArtifact.name, reportArtifact.content)
+                        }
+                      >
+                        Download report.md
+                      </button>
+                    </div>
                   </div>
                   <pre>{reportArtifact.content}</pre>
                 </section>
@@ -1030,8 +1061,8 @@ export default function App() {
             <div className="empty-state">
               <h2>Ready</h2>
               <p>
-                Create the core research task to test plan, permission,
-                progress, and work-packet flow.
+                Create the core research task or import a local script trace to
+                test the work-packet flow.
               </p>
             </div>
           )}

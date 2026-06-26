@@ -66,3 +66,48 @@ test("runs the v0.1 mock research task lifecycle", async ({ page }) => {
     ),
   ).toBe(true);
 });
+
+test("imports a local script trace as a v0.2 work packet", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Import local script trace" }).click();
+
+  await expect(page.getByText("Local script trace imported.")).toBeVisible();
+  await expect(
+    page.getByText("Captured command result: exit code 0."),
+  ).toBeVisible();
+  await expect(page.getByText("# Local Script Trace Import")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download manifest" }),
+  ).toBeVisible();
+
+  const manifest = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    const activeTask = tasks[0];
+    const artifact = activeTask.artifacts.find(
+      (item: { name: string }) => item.name === "manifest.json",
+    );
+    return artifact ? JSON.parse(artifact.content) : null;
+  });
+
+  expect(manifest.schemaVersion).toBe(2);
+  expect(manifest.kind).toBe("wutai.work_packet_manifest");
+  expect(manifest.packetType).toBe("local_script");
+  expect(manifest.producer.adapter).toBe("localScriptTraceImporter");
+  expect(manifest.session.command).toBe("npm run test:evidence");
+  expect(manifest.session.importedTrace).toBe(true);
+  expect(manifest.audit.toolCallCount).toBe(1);
+  expect(manifest.audit.runtimeEventCount).toBe(1);
+  expect(manifest.evidence.status).toBe("not_available");
+  expect(manifest.artifacts.map((item: { name: string }) => item.name)).toEqual([
+    "report.md",
+    "trace.json",
+    "audit.json",
+  ]);
+  expect(manifest.artifacts[1].role).toBe("runtime_trace");
+  expect(manifest.artifacts[1].producer.adapter).toBe("localScriptTraceImporter");
+  expect(manifest.artifacts[1].sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(manifest.coverage.enforcement).toContain(
+    "Trace import records the boundary after execution; it does not enforce shell permissions.",
+  );
+});

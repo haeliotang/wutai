@@ -12,7 +12,9 @@ export type EventVisibility = "user" | "expert" | "internal";
 export type PermissionType =
   | "public_web_search"
   | "public_webpage_read"
-  | "artifact_write";
+  | "artifact_write"
+  | "local_script_trace_import"
+  | "local_script_execution";
 
 export type PermissionStatus = "pending" | "approved" | "denied";
 
@@ -25,8 +27,12 @@ export interface TaskEvent {
     | "TaskStepUpdated"
     | "PermissionRequested"
     | "PermissionResolved"
+    | "HumanConfirmationNeeded"
     | "ArtifactCreated"
     | "SourceCaptured"
+    | "ToolCallCaptured"
+    | "RuntimeEventCaptured"
+    | "CredentialGrantRecorded"
     | "ToolLogAdded"
     | "TaskCompleted"
     | "TaskFailed";

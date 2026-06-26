@@ -126,8 +126,12 @@ Initial event types:
 TaskStarted
 TaskStepUpdated
 PermissionRequested
+PermissionResolved
 HumanConfirmationNeeded
 ArtifactCreated
+ToolCallCaptured
+RuntimeEventCaptured
+CredentialGrantRecorded
 ToolLogAdded
 TaskCompleted
 TaskFailed

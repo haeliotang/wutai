@@ -255,7 +255,7 @@ contracts.
 | Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
-| External trace import | Not required in v0.1 | Add later for Claude Code, Codex, or other agent traces after the work-packet schema is stable. |
+| External trace import | Local-script trace import in v0.2 foundation | Extend later to Claude Code, Codex, or other agent traces after the work-packet schema is stable. |
 | Computer use | Not required in v0.1 | Add later through CUA or Agent-S after stronger safety controls. |
 
 See [Adapter Shortlist](../research/adapter-shortlist-v0.1.md).
@@ -422,8 +422,8 @@ The v0.1 core scenario is complete when:
 
 v0.2 candidates:
 
-- Work-packet manifest generalization for sessions beyond research.
-- CLI wrapper or trace importer for one external coding-agent workflow.
+- Work-packet manifest hardening for sessions beyond research and imported local-script traces.
+- CLI wrapper or coding-agent trace importer for one external workflow.
 - Local file ingestion for user-selected files.
 - PDF export.
 
@@ -449,5 +449,6 @@ Later candidates:
 - Should generated artifacts live in the repo-style `artifacts/` folder or an
   OS app-data directory by default?
 - What is the minimum acceptable source-quality filter for generated reports?
-- How should the current research work-packet manifest evolve to support
-  coding, browser work, and local scripts without becoming enterprise telemetry?
+- How should the current work-packet manifest evolve from research and
+  local-script trace import to coding and browser work without becoming
+  enterprise telemetry?

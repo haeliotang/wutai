@@ -9,10 +9,10 @@ durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
 > Repository status: v0.2 foundation in progress. The current code implements
-> one supervised research workflow and a v0.2 work-packet manifest for that
-> workflow. It does not yet supervise arbitrary external agents,
-> browser-control runtimes, MCP tools, coding agents, or full computer-use
-> sessions.
+> one supervised research workflow, a v0.2 work-packet manifest, and a
+> local-script trace-import wedge. It does not yet execute, sandbox, or enforce
+> permissions for arbitrary external agents, browser-control runtimes, MCP
+> tools, coding agents, or full computer-use sessions.
 
 ## Why This Exists
 
@@ -34,7 +34,8 @@ that records, scopes, and verifies agentic work.
 
 ## Current Implementation
 
-The v0.1 scaffold proves this loop with a bounded research workflow:
+The v0.1 scaffold proves this loop with a bounded research workflow. The v0.2
+foundation extends the work-packet model with local-script trace import:
 
 ```text
 natural-language task
@@ -61,9 +62,12 @@ Implemented:
 - Evidence Gate v0.1 with claim extraction, source-tier classification, and
   deterministic verification summaries.
 - Work Packet Manifest v0.2 with artifact inventory, SHA-256 hashes,
-  permission summaries, evidence status, and coverage/blind-spot notes.
+  permission summaries, session/audit summaries, evidence status, and
+  coverage/blind-spot notes.
+- Local-script trace importer that turns an already-run command trace into a
+  reviewable work packet without executing the command.
 
-Each completed real research task writes a local work packet:
+Each completed research task writes a local work packet:
 
 ```text
 manifest.json
@@ -74,9 +78,19 @@ verification.json
 audit.json
 ```
 
+Each imported local-script trace writes:
+
+```text
+manifest.json
+report.md
+trace.json
+audit.json
+```
+
 Not implemented:
 
-- General supervised sessions for arbitrary external agents.
+- Runtime-enforced supervised sessions for arbitrary external agents.
+- Shell command execution under a Wutai permission broker.
 - MCP proxy or tool-call recorder.
 - Browser-use, Codex, Claude Code, or full computer-use supervision.
 - Cross-agent credential broker.
@@ -95,8 +109,9 @@ Desktop Supervision Console
   -> External agent runtimes and tools
 ```
 
-Current v0.1 only implements the research-adapter slice of this architecture.
-The broader adapter/proxy layers are planned boundaries, not shipped behavior.
+Current code implements the research-adapter slice and a local-script trace
+import slice of this architecture. The broader adapter/proxy layers are planned
+boundaries, not shipped runtime-enforced behavior.
 
 Key design documents:
 
@@ -226,10 +241,11 @@ direction:
 
 Near-term engineering work:
 
-- Generalize the work-packet manifest beyond supervised research reports.
+- Continue generalizing the work-packet manifest beyond research and imported
+  local-script traces.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Add one external-agent supervision wedge, likely a CLI wrapper or trace
-  importer, before direct desktop control.
+- Promote the local-script trace importer into a real CLI wrapper after the
+  permission broker boundary is explicit.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:
