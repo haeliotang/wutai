@@ -8,6 +8,7 @@ import process from "node:process";
 const MAX_CAPTURE_CHARS = 16_000;
 const MAX_SUMMARY_CHARS = 2_000;
 const POLICY_DENIED_EXIT_CODE = 3;
+const POLICY_VERSION = "wutai-cli-policy-v0.2";
 
 function usage() {
   return `Usage:
@@ -18,13 +19,15 @@ Options:
   --cwd <path>          Working directory for the wrapped command. Default: current directory
   --title <text>        Packet title
   --allow-high-risk     Execute even when policy preflight matches high-risk rules
+  --override-reason <text>
+                       Optional reason recorded when --allow-high-risk is used
   --quiet               Do not mirror child stdout/stderr while running
   --help                Show this message
 
 Boundary:
   This developer wrapper executes the requested command and records a work
   packet. It does not sandbox the process, mediate credentials, or enforce a
-  full permission broker. Policy preflight is rule-based and incomplete.`;
+  full permission broker. Policy preflight is structured and incomplete.`;
 }
 
 function parseArgs(argv) {
@@ -36,6 +39,7 @@ function parseArgs(argv) {
     cwd: process.cwd(),
     title: null,
     allowHighRisk: false,
+    overrideReason: null,
     quiet: false,
     help: false,
   };
@@ -46,6 +50,10 @@ function parseArgs(argv) {
       options.help = true;
     } else if (arg === "--allow-high-risk") {
       options.allowHighRisk = true;
+    } else if (arg === "--override-reason") {
+      index += 1;
+      if (!optionArgs[index]) throw new Error("--override-reason requires a value.");
+      options.overrideReason = optionArgs[index];
     } else if (arg === "--quiet") {
       options.quiet = true;
     } else if (arg === "--output-dir") {
@@ -117,104 +125,210 @@ function hasAnyArg(args, candidates) {
   return args.some((arg) => candidates.includes(arg));
 }
 
-function assessPolicy(command, { allowHighRisk }) {
+function hasInspectFlag(args) {
+  return args.some((arg) => arg === "--inspect" || arg.startsWith("--inspect="));
+}
+
+const POLICY_RULES = [
+  {
+    ruleId: "shell_interpreter_command_string",
+    category: "shell_boundary",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message:
+      "Shell interpreter with -c can reintroduce shell expansion outside Wutai's argv boundary.",
+    reviewScope: [
+      "shell expansion",
+      "argument boundary",
+      "filesystem and environment access inherited from the shell",
+    ],
+    matches: ({ name, args }) =>
+      ["sh", "bash", "zsh", "fish", "dash"].includes(name) && args.includes("-c"),
+  },
+  {
+    ruleId: "privilege_escalation",
+    category: "privilege_boundary",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message: "Privilege escalation commands are high risk for a local wrapper.",
+    reviewScope: ["administrator privileges", "system configuration"],
+    matches: ({ name }) => ["sudo", "su", "doas"].includes(name),
+  },
+  {
+    ruleId: "destructive_remove",
+    category: "filesystem_write",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message: "Recursive or forced remove commands can destroy local data.",
+    reviewScope: ["recursive filesystem deletion", "workspace data loss"],
+    matches: ({ name, args }) =>
+      name === "rm" && (hasRecursiveFlag(args) || hasForceFlag(args)),
+  },
+  {
+    ruleId: "destructive_git_operation",
+    category: "source_control",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message: "This git command can discard local work or delete refs.",
+    reviewScope: ["uncommitted work", "git refs", "repository history"],
+    matches: ({ name, args }) =>
+      name === "git" &&
+      ((args[0] === "reset" && args.includes("--hard")) ||
+        (args[0] === "clean" && hasForceFlag(args)) ||
+        (args[0] === "branch" && args.includes("-D"))),
+  },
+  {
+    ruleId: "recursive_permission_change",
+    category: "filesystem_permissions",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message: "Recursive ownership or permission changes can damage a workspace.",
+    reviewScope: ["file ownership", "file permissions", "recursive workspace writes"],
+    matches: ({ name, args }) =>
+      ["chmod", "chown", "chgrp"].includes(name) &&
+      (hasRecursiveFlag(args) || hasAnyArg(args, ["-R"])),
+  },
+  {
+    ruleId: "environment_dump",
+    category: "credential_exposure",
+    severity: "high",
+    defaultAction: "deny",
+    overrideable: true,
+    message: "Environment dump commands can expose provider keys or local secrets.",
+    reviewScope: ["environment variables", "credential exposure", "stdout artifact capture"],
+    matches: ({ name }) => ["env", "printenv"].includes(name),
+  },
+  {
+    ruleId: "network_listener",
+    category: "network_boundary",
+    severity: "medium",
+    defaultAction: "warn",
+    overrideable: false,
+    message: "Starting a local network listener requires review.",
+    reviewScope: ["local network listener", "port exposure"],
+    matches: ({ name, args }) =>
+      ((name === "python" || name === "python3") &&
+        args[0] === "-m" &&
+        args[1] === "http.server") ||
+      (["node", "nodejs"].includes(name) && hasInspectFlag(args)),
+  },
+  {
+    ruleId: "dependency_install_or_update",
+    category: "dependency_mutation",
+    severity: "medium",
+    defaultAction: "warn",
+    overrideable: false,
+    message: "Dependency installation or update can modify local code or tools.",
+    reviewScope: ["dependency tree", "lockfiles", "local toolchain"],
+    matches: ({ name, args }) =>
+      ["npm", "pnpm", "yarn", "pip", "pip3", "brew", "cargo"].includes(name) &&
+      hasAnyArg(args, ["install", "add", "update", "upgrade"]),
+  },
+];
+
+function severityRank(severity) {
+  if (severity === "high") return 3;
+  if (severity === "medium") return 2;
+  if (severity === "low") return 1;
+  return 0;
+}
+
+function highestSeverity(matchedRules) {
+  return matchedRules.reduce(
+    (highest, rule) =>
+      severityRank(rule.severity) > severityRank(highest) ? rule.severity : highest,
+    "low",
+  );
+}
+
+function countBy(items, key) {
+  return items.reduce((counts, item) => {
+    const value = item[key] ?? "unknown";
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function unique(items) {
+  return [...new Set(items)];
+}
+
+function assessPolicy(command, { allowHighRisk, overrideReason }) {
   const name = commandName(command);
   const args = command.slice(1);
-  const matchedRules = [];
-
-  if (["sh", "bash", "zsh", "fish", "dash"].includes(name) && args.includes("-c")) {
-    matchedRules.push({
-      ruleId: "shell_interpreter_command_string",
-      severity: "high",
-      message:
-        "Shell interpreter with -c can reintroduce shell expansion outside Wutai's argv boundary.",
-    });
-  }
-
-  if (["sudo", "su", "doas"].includes(name)) {
-    matchedRules.push({
-      ruleId: "privilege_escalation",
-      severity: "high",
-      message: "Privilege escalation commands are high risk for a local wrapper.",
-    });
-  }
-
-  if (name === "rm" && (hasRecursiveFlag(args) || hasForceFlag(args))) {
-    matchedRules.push({
-      ruleId: "destructive_remove",
-      severity: "high",
-      message: "Recursive or forced remove commands can destroy local data.",
-    });
-  }
-
-  if (
-    name === "git" &&
-    ((args[0] === "reset" && args.includes("--hard")) ||
-      (args[0] === "clean" && hasForceFlag(args)) ||
-      (args[0] === "branch" && args.includes("-D")))
-  ) {
-    matchedRules.push({
-      ruleId: "destructive_git_operation",
-      severity: "high",
-      message: "This git command can discard local work or delete refs.",
-    });
-  }
-
-  if (
-    ["chmod", "chown", "chgrp"].includes(name) &&
-    (hasRecursiveFlag(args) || hasAnyArg(args, ["-R"]))
-  ) {
-    matchedRules.push({
-      ruleId: "recursive_permission_change",
-      severity: "high",
-      message: "Recursive ownership or permission changes can damage a workspace.",
-    });
-  }
-
-  if (
-    (name === "python" || name === "python3") &&
-    args[0] === "-m" &&
-    args[1] === "http.server"
-  ) {
-    matchedRules.push({
-      ruleId: "network_listener",
-      severity: "medium",
-      message: "Starting a local network listener requires review.",
-    });
-  }
-
-  if (
-    ["npm", "pnpm", "yarn", "pip", "pip3", "brew", "cargo"].includes(name) &&
-    hasAnyArg(args, ["install", "add", "update", "upgrade"])
-  ) {
-    matchedRules.push({
-      ruleId: "dependency_install_or_update",
-      severity: "medium",
-      message: "Dependency installation or update can modify local code or tools.",
-    });
-  }
-
-  const highestSeverity = matchedRules.some((rule) => rule.severity === "high")
-    ? "high"
-    : matchedRules.some((rule) => rule.severity === "medium")
-      ? "medium"
-      : "low";
+  const context = { command, name, args };
+  const matchedRules = POLICY_RULES.filter((rule) => rule.matches(context)).map(
+    ({ matches, ...rule }) => rule,
+  );
+  const denyRules = matchedRules.filter((rule) => rule.defaultAction === "deny");
+  const warningRules = matchedRules.filter((rule) => rule.defaultAction === "warn");
+  const overrideableDenyRules = denyRules.filter((rule) => rule.overrideable);
+  const blockingDenyRules = denyRules.filter(
+    (rule) => !allowHighRisk || !rule.overrideable,
+  );
   const decision =
-    highestSeverity === "high" && !allowHighRisk
+    blockingDenyRules.length > 0
       ? "deny"
-      : highestSeverity === "high" && allowHighRisk
+      : allowHighRisk && overrideableDenyRules.length > 0
         ? "allow_with_override"
-        : highestSeverity === "medium"
+        : warningRules.length > 0
           ? "allow_with_warnings"
           : "allow";
+  const reviewScope = unique(matchedRules.flatMap((rule) => rule.reviewScope));
+  const riskProfile = {
+    matchedRuleCount: matchedRules.length,
+    severityCounts: countBy(matchedRules, "severity"),
+    actionCounts: countBy(matchedRules, "defaultAction"),
+    highestSeverity: highestSeverity(matchedRules),
+  };
+  const decisionRationale =
+    decision === "deny"
+      ? [
+          `Denied because ${blockingDenyRules.length} matched rule requires pre-execution review.`,
+          "Use --allow-high-risk only when the caller intentionally accepts the recorded boundary.",
+        ]
+      : decision === "allow_with_override"
+        ? [
+            `Allowed because --allow-high-risk overrode ${overrideableDenyRules.length} high-risk rule.`,
+            "The override is recorded in policy.json and audit.json.",
+          ]
+        : warningRules.length > 0
+          ? [
+              `Allowed with warnings because ${warningRules.length} review rule matched.`,
+              "The command still runs with the invoking shell's ambient permissions.",
+            ]
+          : ["Allowed because no policy rules matched this invocation."];
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "wutai.cli_policy_preflight",
+    policyVersion: POLICY_VERSION,
+    engine: {
+      name: "wutai_cli_policy",
+      version: "0.2",
+      ruleCount: POLICY_RULES.length,
+    },
     decision,
-    highestSeverity,
+    highestSeverity: riskProfile.highestSeverity,
     allowHighRisk,
+    override: {
+      requested: allowHighRisk,
+      applied: decision === "allow_with_override",
+      reason: overrideReason ?? null,
+      appliedRuleIds:
+        decision === "allow_with_override"
+          ? overrideableDenyRules.map((rule) => rule.ruleId)
+          : [],
+    },
     matchedRules,
+    riskProfile,
+    decisionRationale,
+    reviewScope,
     summary:
       decision === "deny"
         ? "Policy preflight denied execution before the command ran."
@@ -222,7 +336,7 @@ function assessPolicy(command, { allowHighRisk }) {
           ? "Policy preflight allowed execution with warnings."
           : "Policy preflight allowed execution with no matched risk rules.",
     limitation:
-      "This rule set is intentionally small and is not a complete shell safety policy.",
+      "This structured rule set is intentionally incomplete and is not a sandbox, credential broker, filesystem policy, or complete shell safety policy.",
   };
 }
 
@@ -372,7 +486,7 @@ function buildManifest({
       sourcesArtifact: null,
       unsupportedItems: [
         "The wrapper records process metadata and bounded output; it does not prove the command was safe.",
-        "Policy preflight uses a small static rule set; it is not a complete shell safety policy.",
+        "Policy preflight uses a structured but incomplete rule catalog; it is not a complete shell safety policy.",
       ],
       blindSpots: [
         "No process sandbox, filesystem policy, network policy, or credential mediation is active.",
@@ -435,6 +549,8 @@ function buildReport({
 - Decision: ${policy.decision}
 - Highest severity: ${policy.highestSeverity}
 - Matched rules: ${policy.matchedRules.length ? policy.matchedRules.map((rule) => rule.ruleId).join(", ") : "none"}
+- Review scope: ${policy.reviewScope.length ? policy.reviewScope.join(", ") : "none"}
+- Rationale: ${policy.decisionRationale.join(" ")}
 
 ## Result
 
@@ -452,9 +568,9 @@ function buildReport({
 ## Boundary
 
 This packet was created by the Wutai development CLI wrapper. The wrapper ran
-or denied the requested argv according to a small static policy preflight. It
-did not sandbox the process, mediate credentials, block filesystem or network
-access, or enforce a complete destructive-command policy.
+or denied the requested argv according to a structured but incomplete policy
+preflight. It did not sandbox the process, mediate credentials, block filesystem
+or network access, or enforce a complete destructive-command policy.
 
 ## Task
 
@@ -517,6 +633,7 @@ async function main() {
   const commandText = commandLine(command);
   const policy = assessPolicy(command, {
     allowHighRisk: options.allowHighRisk,
+    overrideReason: options.overrideReason,
   });
   const deniedByPolicy = policy.decision === "deny";
   let touchedFiles = [];
@@ -533,7 +650,9 @@ async function main() {
     if (!options.quiet) {
       console.error(policy.summary);
       for (const rule of policy.matchedRules) {
-        console.error(`- ${rule.ruleId}: ${rule.message}`);
+        console.error(
+          `- ${rule.ruleId} [${rule.severity}/${rule.defaultAction}]: ${rule.message}`,
+        );
       }
       console.error("Re-run with --allow-high-risk to override this preflight.");
     }

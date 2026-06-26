@@ -191,19 +191,23 @@ the explicit invocation, argv, working directory, policy preflight decision,
 exit code, bounded stdout/stderr summaries, a git-status delta, and artifact
 hashes.
 
-Known high-risk patterns such as shell interpreter command strings, recursive
-or forced remove, privilege escalation, destructive git operations, and
-recursive permission changes are denied before execution by default. To record
-an explicit override:
+The wrapper uses a structured but incomplete policy catalog. High-risk patterns
+such as shell interpreter command strings, recursive or forced remove,
+environment dumps, privilege escalation, destructive git operations, and
+recursive permission changes are denied before execution by default. Medium
+risk patterns such as dependency mutation or local network listeners are
+recorded as warnings. To record an explicit override:
 
 ```bash
-npm run wutai:run -- --allow-high-risk -- sh -c "printf reviewed"
+npm run wutai:run -- --allow-high-risk \
+  --override-reason "reviewed shell boundary" -- sh -c "printf reviewed"
 ```
 
 Boundary: this wrapper does not sandbox the process, mediate credentials, block
 network or filesystem access, or enforce a complete destructive-command policy.
-The policy rule set is intentionally small. It is a verified local execution
-ledger, not a full permission broker.
+The policy catalog records rule category, severity, default action, override
+state, rationale, and review scope. It is a verified local execution ledger, not
+a full permission broker.
 
 To review a generated packet in the app, open the web preview or Tauri shell and
 choose `Import CLI packet directory`. The file-based fallback is `Import CLI
@@ -313,7 +317,8 @@ Near-term engineering work:
 - Continue generalizing the work-packet manifest beyond research, imported
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Extend CLI policy preflight beyond the current small high-risk rule set.
+- Add configurable CLI policy profiles and stronger non-interactive dry-run
+  review.
 - Extend desktop CLI packet review with stronger packet provenance checks and
   richer audit filtering.
 - Define the minimal credential-broker boundary for task-scoped provider access.

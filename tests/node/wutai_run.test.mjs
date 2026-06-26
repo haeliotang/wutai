@@ -63,7 +63,12 @@ test("wutai_run writes a completed local-script work packet", async () => {
   assert.match(manifest.artifacts[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(manifest.artifacts[1].role, "policy_preflight");
   assert.equal(manifest.artifacts[3].role, "session_ledger");
+  assert.equal(policy.schemaVersion, 2);
+  assert.equal(policy.policyVersion, "wutai-cli-policy-v0.2");
+  assert.equal(policy.engine.name, "wutai_cli_policy");
+  assert.equal(policy.riskProfile.matchedRuleCount, 0);
   assert.equal(policy.decision, "allow");
+  assert.deepEqual(policy.reviewScope, []);
   assert.equal(trace.captureMode, "cli_wrapper");
   assert.equal(trace.executed, true);
   assert.equal(trace.exitCode, 0);
@@ -131,6 +136,13 @@ test("wutai_run denies matched high-risk commands before execution", async () =>
   assert.equal(policy.decision, "deny");
   assert.equal(policy.highestSeverity, "high");
   assert.equal(policy.matchedRules[0].ruleId, "shell_interpreter_command_string");
+  assert.equal(policy.matchedRules[0].category, "shell_boundary");
+  assert.equal(policy.matchedRules[0].defaultAction, "deny");
+  assert.equal(policy.matchedRules[0].overrideable, true);
+  assert.equal(policy.override.requested, false);
+  assert.equal(policy.override.applied, false);
+  assert.equal(policy.reviewScope.includes("shell expansion"), true);
+  assert.match(policy.decisionRationale.join(" "), /Denied because/);
   assert.equal(manifest.status, "cancelled");
   assert.equal(manifest.audit.toolCallCount, 0);
   assert.equal(manifest.audit.runtimeEventCount, 0);
@@ -142,6 +154,40 @@ test("wutai_run denies matched high-risk commands before execution", async () =>
   assert.equal(ledger.task.status, "cancelled");
 });
 
+test("wutai_run records warning policy rules without blocking execution", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-warning-"));
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--output-dir",
+      outputRoot,
+      "--",
+      process.execPath,
+      "--inspect=0",
+      "-e",
+      "console.log('inspect warning path')",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0);
+  const { manifest, policy, trace, audit } = await latestPacket(outputRoot);
+
+  assert.equal(policy.decision, "allow_with_warnings");
+  assert.equal(policy.highestSeverity, "medium");
+  assert.equal(policy.matchedRules[0].ruleId, "network_listener");
+  assert.equal(policy.matchedRules[0].category, "network_boundary");
+  assert.equal(policy.matchedRules[0].defaultAction, "warn");
+  assert.equal(policy.riskProfile.actionCounts.warn, 1);
+  assert.equal(policy.reviewScope.includes("local network listener"), true);
+  assert.equal(manifest.audit.policyDecision, "allow_with_warnings");
+  assert.equal(trace.executed, true);
+  assert.match(trace.stdoutSummary, /inspect warning path/);
+  assert.equal(audit.toolCalls.length, 1);
+});
+
 test("wutai_run records explicit high-risk override", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-override-"));
   const result = spawnSync(
@@ -150,6 +196,8 @@ test("wutai_run records explicit high-risk override", async () => {
       wrapperPath,
       "--quiet",
       "--allow-high-risk",
+      "--override-reason",
+      "reviewed shell boundary for test fixture",
       "--output-dir",
       outputRoot,
       "--",
@@ -165,6 +213,12 @@ test("wutai_run records explicit high-risk override", async () => {
 
   assert.equal(policy.decision, "allow_with_override");
   assert.equal(policy.allowHighRisk, true);
+  assert.equal(policy.override.requested, true);
+  assert.equal(policy.override.applied, true);
+  assert.equal(policy.override.reason, "reviewed shell boundary for test fixture");
+  assert.deepEqual(policy.override.appliedRuleIds, [
+    "shell_interpreter_command_string",
+  ]);
   assert.equal(policy.matchedRules[0].ruleId, "shell_interpreter_command_string");
   assert.equal(manifest.status, "completed");
   assert.equal(manifest.audit.policyDecision, "allow_with_override");

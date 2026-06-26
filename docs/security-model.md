@@ -90,9 +90,11 @@ These actions must be blocked unless a specific confirmation flow exists:
 The v0.2 developer CLI wrapper can execute an explicitly supplied local command
 and create a work packet. Its current boundary is rule-based and incomplete:
 
-- It runs a static policy preflight before execution.
+- It runs a structured but incomplete policy preflight before execution.
 - It denies matched high-risk rules by default, unless the caller passes
   `--allow-high-risk`.
+- It records policy rule category, severity, default action, override state,
+  rationale, and review scope in `policy.json`.
 - It records argv, working directory, policy decision, exit code, bounded
   stdout/stderr summaries, git-status delta, session ledger, audit trail, and
   artifact hashes.
