@@ -6,6 +6,7 @@ import {
 } from "../domain/task";
 import type { ArtifactWriter } from "../artifacts/artifactWriter";
 import type { EvidenceVerification } from "../domain/evidence";
+import { appendWorkPacketManifest } from "../domain/workPacket";
 import type { ResearchAdapter, TaskUpdateHandler } from "./researchAdapter";
 
 const sources: Array<Omit<SourceRecord, "sourceId" | "taskId">> = [
@@ -66,8 +67,8 @@ adapter that emits Wutai task events.
 - Local task state: SQLite through the Tauri SQL plugin, with localStorage only
   for browser preview and test runs.
 - Research runtime: GPT Researcher.
-- Evidence surface: report.md, sources.json, claims.json, verification.json,
-  and audit.json.
+- Evidence surface: manifest.json, report.md, sources.json, claims.json,
+  verification.json, and audit.json.
 - Future supervised-session wedges: coding-agent trace import, MCP proxy,
   browser-use, Codex, CUA, and Agent-S.
 
@@ -177,7 +178,7 @@ export async function runMockResearchAdapter(
       },
     ],
   };
-  const artifacts: ArtifactRecord[] = [
+  const baseArtifacts: ArtifactRecord[] = [
     {
       artifactId: `${task.taskId}_artifact_report`,
       taskId: task.taskId,
@@ -236,19 +237,36 @@ export async function runMockResearchAdapter(
     },
   ];
 
-  task = {
+  const completedTask: WutaiTask = {
     ...task,
     status: "completed",
     sources: sourceRecords,
-    artifacts,
+    artifacts: baseArtifacts,
     updatedAt: createdAt,
+  };
+
+  task = {
+    ...completedTask,
+    artifacts: await appendWorkPacketManifest({
+      task: completedTask,
+      artifacts: baseArtifacts,
+      createdAt,
+      packetType: "research",
+      producer: {
+        name: "wutai",
+        adapter: "mockResearchAdapter",
+        runtime: "offline mock",
+      },
+      evidenceVerification: verification,
+    }),
   };
 
   task = await artifactWriter.write(task);
 
   task = appendEvent(task, {
     type: "ArtifactCreated",
-    summary: "Saved report, sources, claims, verification, and audit artifacts.",
+    summary:
+      "Saved manifest, report, sources, claims, verification, and audit artifacts.",
     details:
       artifactWriter.backendName === "Tauri app-data files"
         ? "Artifacts were written to the local Tauri app-data directory."

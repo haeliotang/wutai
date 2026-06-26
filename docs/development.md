@@ -214,9 +214,10 @@ TaskFailed
 
 ## 9. Artifact 和 Work Packet
 
-v0.1 的 work packet 至少包含：
+当前 research work packet 至少包含：
 
 ```text
+manifest.json
 report.md
 sources.json
 claims.json
@@ -224,6 +225,7 @@ verification.json
 audit.json
 ```
 
+`manifest.json` 是 v0.2 work-packet manifest，记录 packet id、task/session id、artifact inventory、SHA-256、权限摘要、Evidence Gate 状态、coverage 和 blind spots。
 `report.md` 是用户可读成果物。
 `sources.json` 是捕获来源。
 `claims.json` 是可复核主张账本。
@@ -402,7 +404,9 @@ Wutai 默认不应把权限永久化。权限应按 task/session scope 记录，
 
 ### 16.1 Work Packet Schema v0.2
 
-目标：把当前 research-specific artifacts 提升为跨 agent session 可用的 schema。
+当前已完成第一片：research workflow 会生成 `manifest.json`，并记录 artifact inventory、SHA-256、权限摘要、Evidence Gate 状态、coverage 和 blind spots。
+
+下一目标：把当前 research-specific manifest 提升为跨 agent session 可用的 schema。
 
 验收标准：
 
@@ -501,7 +505,8 @@ v0.1 当前可接受的事实表述：
 - Wutai 支持一个受监督 research workflow。
 - Wutai 支持任务级 public web-research permission。
 - Wutai 可通过 Provider Profiles 和系统钥匙串配置真实 research sidecar。
-- Wutai 会生成 `report.md`、`sources.json`、`claims.json`、`verification.json`、`audit.json`。
+- Wutai 会生成 `manifest.json`、`report.md`、`sources.json`、`claims.json`、`verification.json`、`audit.json`。
+- `manifest.json` 会记录 artifact inventory、SHA-256、权限摘要、Evidence Gate 状态、coverage 和 blind spots。
 - Evidence Gate 会把弱证据报告标记为需要 review。
 - Rust、Playwright、Python 测试覆盖当前核心边界。
 

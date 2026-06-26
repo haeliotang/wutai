@@ -296,6 +296,13 @@ export default function App() {
     [activeTask],
   );
 
+  const manifestArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "manifest.json") ??
+      null,
+    [activeTask],
+  );
+
   const verificationArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "verification.json") ??
@@ -985,6 +992,19 @@ export default function App() {
                         Download verification
                       </button>
                     )}
+                    {manifestArtifact && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadArtifact(
+                            manifestArtifact.name,
+                            manifestArtifact.content,
+                          )
+                        }
+                      >
+                        Download manifest
+                      </button>
+                    )}
                   </div>
                 </section>
               )}
@@ -1011,7 +1031,7 @@ export default function App() {
               <h2>Ready</h2>
               <p>
                 Create the core research task to test plan, permission,
-                progress, and artifact flow.
+                progress, and work-packet flow.
               </p>
             </div>
           )}

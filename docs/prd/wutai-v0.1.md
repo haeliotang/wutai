@@ -219,6 +219,7 @@ The core output is a work packet:
 - `artifacts/<task_id>/claims.json`
 - `artifacts/<task_id>/verification.json`
 - `artifacts/<task_id>/audit.json`
+- `artifacts/<task_id>/manifest.json`
 
 Markdown is required for v0.1 because it is transparent, easy to diff, and easy
 to export later.
@@ -364,8 +365,8 @@ The v0.1 core scenario is complete when:
 7. Denying permission prevents execution and records the decision.
 8. Approving permission starts the research adapter.
 9. Progress appears as plain-language timeline events.
-10. The task creates `report.md`, `sources.json`, `claims.json`,
-    `verification.json`, and `audit.json`.
+10. The task creates `manifest.json`, `report.md`, `sources.json`,
+    `claims.json`, `verification.json`, and `audit.json`.
 11. The completion view links to the work packet.
 12. The user can reopen the task and inspect the audit trail.
 13. No default offline flow exposes MCP, skills, raw terminal output, or
@@ -421,7 +422,7 @@ The v0.1 core scenario is complete when:
 
 v0.2 candidates:
 
-- Work-packet schema hardening for sessions beyond research.
+- Work-packet manifest generalization for sessions beyond research.
 - CLI wrapper or trace importer for one external coding-agent workflow.
 - Local file ingestion for user-selected files.
 - PDF export.
@@ -448,5 +449,5 @@ Later candidates:
 - Should generated artifacts live in the repo-style `artifacts/` folder or an
   OS app-data directory by default?
 - What is the minimum acceptable source-quality filter for generated reports?
-- What is the smallest cross-agent work-packet schema that can support research,
+- How should the current research work-packet manifest evolve to support
   coding, browser work, and local scripts without becoming enterprise telemetry?

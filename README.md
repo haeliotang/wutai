@@ -8,8 +8,9 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.1 scaffold. The current code implements one supervised
-> research workflow. It does not yet supervise arbitrary external agents,
+> Repository status: v0.2 foundation in progress. The current code implements
+> one supervised research workflow and a v0.2 work-packet manifest for that
+> workflow. It does not yet supervise arbitrary external agents,
 > browser-control runtimes, MCP tools, coding agents, or full computer-use
 > sessions.
 
@@ -59,10 +60,13 @@ Implemented:
 - Redacted expert logs captured into `audit.json`.
 - Evidence Gate v0.1 with claim extraction, source-tier classification, and
   deterministic verification summaries.
+- Work Packet Manifest v0.2 with artifact inventory, SHA-256 hashes,
+  permission summaries, evidence status, and coverage/blind-spot notes.
 
 Each completed real research task writes a local work packet:
 
 ```text
+manifest.json
 report.md
 sources.json
 claims.json
@@ -222,7 +226,7 @@ direction:
 
 Near-term engineering work:
 
-- Harden the work-packet schema beyond research reports.
+- Generalize the work-packet manifest beyond supervised research reports.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Add one external-agent supervision wedge, likely a CLI wrapper or trace
   importer, before direct desktop control.

@@ -91,7 +91,7 @@ export function createTask(userRequest: string): WutaiTask {
       "Search public sources for relevant agent governance and observability tools.",
       "Read selected public project and product pages and capture source notes.",
       "Draft a concise market comparison report.",
-      "Save the work packet: report, sources, claim ledger, evidence verification, and audit trail.",
+      "Save the work packet: manifest, report, sources, claim ledger, evidence verification, and audit trail.",
     ],
     createdAt: now,
     updatedAt: now,

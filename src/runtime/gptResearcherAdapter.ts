@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type { ArtifactRecord, SourceRecord, WutaiTask } from "../domain/task";
 import { appendEvent } from "../domain/task";
 import type { EvidenceVerification } from "../domain/evidence";
+import { appendWorkPacketManifest } from "../domain/workPacket";
 import type {
   ResearchAdapter,
   ResearchPreflight,
@@ -280,7 +281,7 @@ export const gptResearcherAdapter: ResearchAdapter = {
       note: source.note?.trim() || "Captured by GPT Researcher.",
     }));
 
-    const artifacts: ArtifactRecord[] = [
+    const baseArtifacts: ArtifactRecord[] = [
       {
         artifactId: `${task.taskId}_artifact_report`,
         taskId: task.taskId,
@@ -340,13 +341,37 @@ export const gptResearcherAdapter: ResearchAdapter = {
       },
     ];
 
-    task = {
+    const finalStatus =
+      verification.status === "pass" ? "completed" : "completed_with_warnings";
+    const completedTask: WutaiTask = {
       ...task,
-      status:
-        verification.status === "pass" ? "completed" : "completed_with_warnings",
+      status: finalStatus,
       sources: sourceRecords,
-      artifacts,
+      artifacts: baseArtifacts,
       updatedAt: createdAt,
+    };
+
+    task = {
+      ...completedTask,
+      artifacts: await appendWorkPacketManifest({
+        task: completedTask,
+        artifacts: baseArtifacts,
+        createdAt,
+        packetType: "research",
+        producer: {
+          name: "wutai",
+          adapter: "gptResearcherAdapter",
+          runtime: "gpt-researcher sidecar",
+        },
+        evidenceVerification: verification,
+        coverage: {
+          blindSpots: [
+            "Wutai captures GPT Researcher sidecar outputs and logs; it does not inspect every internal model/tool decision.",
+            "Evidence Gate checks extracted claims; it does not verify every statement.",
+            "External browser or desktop activity outside the GPT Researcher sidecar is not captured.",
+          ],
+        },
+      }),
     };
 
     task = await artifactWriter.write(task);
@@ -354,7 +379,7 @@ export const gptResearcherAdapter: ResearchAdapter = {
     task = appendEvent(task, {
       type: "ArtifactCreated",
       summary:
-        "Saved report, sources, claims, evidence verification, and audit artifacts.",
+        "Saved manifest, report, sources, claims, evidence verification, and audit artifacts.",
       details: verification.summary,
       visibility: "user",
     });
