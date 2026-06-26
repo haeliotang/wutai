@@ -96,6 +96,7 @@ The broader adapter/proxy layers are planned boundaries, not shipped behavior.
 
 Key design documents:
 
+- [Development Guide](docs/development.md)
 - [Product Brief](docs/product-brief.md)
 - [MVP Definition](docs/mvp.md)
 - [Architecture](docs/architecture.md)
