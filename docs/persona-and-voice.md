@@ -2,13 +2,14 @@
 
 ## Goal
 
-Wutai should feel like a personal computer agent that belongs to the user. The
-visual theme, name, voice, and speaking style should be customizable without
-turning the product into a toy or weakening the safety model.
+Wutai should feel like a local supervision console that belongs to the user.
+Visual theme, name, voice, and speaking style may be customizable later, but
+they are secondary to permissions, evidence, artifacts, and auditability.
 
 ## Customizable Attributes
 
 - Assistant name.
+- Console name.
 - Visual theme.
 - Typography and density.
 - Voice provider.
@@ -20,7 +21,7 @@ turning the product into a toy or weakening the safety model.
 
 ## Useful Memory
 
-Persona memory should prioritize work preferences over novelty:
+Preference memory should prioritize review and work preferences over novelty:
 
 - Preferred output language.
 - Default report structure.
@@ -30,6 +31,7 @@ Persona memory should prioritize work preferences over novelty:
 - Approval preferences.
 - Sources the user trusts or dislikes.
 - Actions that always require confirmation.
+- Evidence thresholds that should trigger review.
 
 ## Voice Boundary
 
@@ -48,6 +50,7 @@ A persona may change wording, pacing, and presence. It may not override:
 - Audit logging.
 - High-risk action blocks.
 - Data handling policy.
+- Human-attested review requirements.
 
 ## First Version
 
@@ -55,7 +58,7 @@ The first version should support:
 
 - One default text persona.
 - A small set of visual themes.
-- Optional TTS output through a pluggable provider.
 - Basic preference storage.
 
-Advanced persona editing should wait until the task and permission model works.
+Voice and advanced persona editing should wait until the supervised-session,
+permission, and evidence models work.

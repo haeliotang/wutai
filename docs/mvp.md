@@ -2,36 +2,37 @@
 
 ## Objective
 
-Build the smallest Wutai version that proves a non-programmer can start a
-desktop-grade task, grant scoped permissions, observe progress, and receive a
-durable artifact without seeing developer-facing agent complexity.
+Build the smallest Wutai version that proves a user can run a bounded agentic
+task under local supervision, grant scoped permissions, observe progress, and
+receive a durable work packet with artifacts, sources, claims, evidence checks,
+and an audit trail.
 
 The implementation source of truth for the first release is
 [Wutai v0.1 PRD](prd/wutai-v0.1.md).
 
 ## Candidate MVP Workflow
 
-Deep research is the recommended first workflow because it tests task planning,
-browser/search integration, evidence capture, artifact generation, and long
-running progress without requiring dangerous desktop control.
+Deep research is the recommended first supervised workflow because it tests
+task planning, public web access, evidence capture, artifact generation, and
+long-running progress without requiring dangerous desktop control.
 
 Example task:
 
 ```text
-Research open-source personal computer agent projects and produce a short
-market report with sources.
+Research agent work governance tools and produce a short market report with
+sources.
 ```
 
 ## User-facing Requirements
 
-- A desktop shell opens into a minimal command-console style UI.
-- The user can describe a task in natural language.
+- A desktop supervision console opens into a minimal command-console style UI.
+- The user can describe a task or supervised session in natural language.
 - Wutai converts the request into a readable plan before execution.
 - Wutai requests permission before using browser/search or reading local files.
 - The user can approve, deny, or scope each permission request.
 - Progress is shown in plain language.
 - Raw logs are available in an expanded expert view, not the default view.
-- The task produces at least one durable artifact.
+- The task produces a durable work packet, not only a chat answer.
 - The task can be reopened from history.
 
 ## Technical Requirements
@@ -41,6 +42,10 @@ market report with sources.
 - A permission request object is persisted with status and scope.
 - An artifact record is persisted with path, type, source task, and creation
   timestamp.
+- Evidence verification records are persisted for claims extracted from the
+  final artifact.
+- An audit artifact records permissions, task events, provider metadata, and
+  redacted runtime context.
 - At least one backend adapter can run through the Wutai task event contract.
 - The adapter emits enough events to render a useful progress timeline.
 - The app can run without exposing API keys or local secrets in logs.
@@ -54,6 +59,8 @@ market report with sources.
   confirmation flow.
 - The app includes a visible stop control during task execution.
 - The final artifact includes source notes when external sources are used.
+- Evidence warnings are visible when claims are weakly supported or conflict
+  with locked reference facts.
 
 ## Acceptance Criteria
 
@@ -64,8 +71,8 @@ The MVP is acceptable when a fresh user can:
 3. Start a research task from natural language.
 4. Review and approve the generated plan.
 5. Watch progress without understanding tools or protocols.
-6. Open the generated artifact.
-7. Review which permissions and sources were used.
+6. Open the generated work packet.
+7. Review which permissions, sources, claims, and evidence checks were used.
 8. Resume or revisit the task later.
 
 ## Out of Scope
@@ -76,4 +83,6 @@ The MVP is acceptable when a fresh user can:
 - App store or marketplace.
 - Custom plugin authoring UI.
 - Multi-agent orchestration UI.
+- General-purpose MCP proxy.
+- Cross-agent credential broker.
 - Payments, email sending, social posting, or destructive file operations.

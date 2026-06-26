@@ -29,7 +29,7 @@ test("shows evidence warnings as a distinct completed state", async ({ page }) =
   };
   const task = {
     taskId: "task_warning_fixture",
-    title: "Research personal computer agent projects",
+    title: "Research agent work governance tools",
     userRequest: "Compare desktop agents.",
     status: "completed_with_warnings",
     plan: ["Research and verify claims."],

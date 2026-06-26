@@ -83,15 +83,15 @@ export function createTask(userRequest: string): WutaiTask {
 
   return {
     taskId,
-    title: "Research personal computer agent projects",
+    title: "Research agent work governance tools",
     userRequest,
     status: "waiting_for_permission",
     plan: [
       "Restate the research goal and define comparison criteria.",
-      "Search public sources for relevant open-source projects.",
-      "Read selected public project pages and capture source notes.",
+      "Search public sources for relevant agent governance and observability tools.",
+      "Read selected public project and product pages and capture source notes.",
       "Draft a concise market comparison report.",
-      "Save the report, sources, claim ledger, evidence verification, and audit trail.",
+      "Save the work packet: report, sources, claim ledger, evidence verification, and audit trail.",
     ],
     createdAt: now,
     updatedAt: now,
@@ -111,7 +111,7 @@ export function createTask(userRequest: string): WutaiTask {
         type: "PermissionRequested",
         summary: "Waiting for public web-research permission.",
         details:
-          "Scope: public web search, public webpage reading, and writing new task artifacts only.",
+          "Scope: public web search, public webpage reading, and writing new task work-packet artifacts only.",
         visibility: "user",
       },
     ],

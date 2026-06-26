@@ -3,8 +3,8 @@
 Last checked: 2026-06-19 via GitHub repository metadata.
 
 Wutai should not rebuild mature agent infrastructure. The v0.1 product should
-wrap mature open-source projects behind a small Wutai-owned task and permission
-contract.
+wrap mature open-source projects behind a small Wutai-owned supervision,
+permission, evidence, and artifact contract.
 
 ## Selected for v0.1
 
@@ -22,7 +22,9 @@ contract.
 | --- | --- | --- | --- |
 | Browser automation | [browser-use/browser-use](https://github.com/browser-use/browser-use) | MIT | Strong candidate, but v0.1 can prove the product with research first. |
 | Research alternative | [langchain-ai/open_deep_research](https://github.com/langchain-ai/open_deep_research) | MIT | Keep as fallback or comparison, not initial dependency. |
-| Coding/local execution | [openai/codex](https://github.com/openai/codex) | Apache-2.0 | Useful future adapter; not part of non-programmer v0.1 research flow. |
+| Coding/local execution | [openai/codex](https://github.com/openai/codex) | Apache-2.0 | Useful future adapter or trace source; not part of v0.1 research flow. |
+| Coding-agent trace source | Claude Code plugin/hooks ecosystem | Provider platform terms | Useful future supervised-session wedge if Wutai can ingest sanitized local traces without depending on a private transcript format. |
+| MCP proxy | Model Context Protocol servers and clients | Varies by server | Useful future permission and tool-call boundary; defer until Wutai has a stable work-packet schema. |
 | Computer-use runtime | [trycua/cua](https://github.com/trycua/cua) | MIT | Powerful but higher safety risk; requires stronger permission controls first. |
 | Computer-use agent | [simular-ai/Agent-S](https://github.com/simular-ai/Agent-S) | Apache-2.0 | Same defer reason as CUA. |
 | Browser workflow automation | [Skyvern-AI/skyvern](https://github.com/Skyvern-AI/skyvern) | AGPL-3.0 | Mature and relevant, but AGPL and workflow scope make it a later evaluation. |
@@ -36,6 +38,8 @@ contract.
 - Do not expose third-party runtime concepts as default UX.
 - Do not add direct desktop control until Wutai's permission broker is proven.
 - Keep every external runtime behind Wutai event translation.
+- Prefer trace import or proxy integration before direct control when it can
+  prove the same work-packet loop with less risk.
 
 ## Current v0.1 Dependency Boundary
 
@@ -46,6 +50,7 @@ Build:
 - Wutai permission broker.
 - Wutai event contract.
 - Wutai artifact and audit model.
+- Wutai Evidence Gate.
 - GPT Researcher adapter.
 
 Reuse:
@@ -59,6 +64,8 @@ Reuse:
 
 Do not build yet:
 
+- General CLI supervision wrapper.
+- MCP proxy.
 - Browser automation engine.
 - Computer-use engine.
 - Workflow automation engine.

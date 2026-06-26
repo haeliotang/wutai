@@ -1,8 +1,9 @@
 # Market Scan
 
 This note summarizes the current open-source landscape around personal computer
-agents, task-first AI workspaces, browser automation, research agents, and
-agent UIs. It is a product-positioning scan, not a benchmark.
+agents, task-first AI workspaces, browser automation, research agents, agent
+UIs, and agent work governance. It is a product-positioning scan, not a
+benchmark.
 
 Repository popularity changes quickly. Re-check current GitHub metadata before
 using these numbers in external material.
@@ -19,9 +20,11 @@ separate categories:
 - Developer agent workspaces.
 - Research agents.
 - Early personal assistant shells.
+- Agent observability, evals, and governance tools.
 
-There is still room for a product that hides these implementation layers behind
-a simple task-first desktop experience for non-programmers.
+There is still room for a product that gives individuals and small teams a
+local trust layer across these implementation layers: scoped access, audit,
+work packets, evidence receipts, and human review.
 
 ## Relevant Projects
 
@@ -37,8 +40,9 @@ a simple task-first desktop experience for non-programmers.
 - Cherry Studio and Chatbox: mature multi-model AI clients, closer to chat
   productivity than task lifecycle.
 
-Product lesson: the space is moving quickly, but many products still expose
-agent, model, skill, provider, or workflow complexity.
+Product lesson: the space is moving quickly, but "be the user's agent app" is
+crowded and vulnerable to OS and model-provider platforms. Wutai should not
+compete mainly on doing tasks better.
 
 ### No-code Agent and Workflow Platforms
 
@@ -83,29 +87,45 @@ experience.
 
 Product lesson: developer agent UIs are useful references for streaming events,
 tool traces, approvals, and workspaces. They are not the target UX for
-non-programmers.
+reviewing supervised work packets.
+
+### Agent Observability, Evals, and Governance
+
+- LangSmith, Langfuse, Phoenix, Braintrust, and Weave focus on tracing,
+  evaluation, debugging, and monitoring.
+- Gateway and governance products focus on policy, access, audit, and provider
+  control, usually for teams or enterprises.
+- OS and model-provider platforms are adding their own agent registries,
+  permissions, connectors, and runtime traces.
+
+Product lesson: enterprise observability and platform control planes are
+crowded. The clearer gap is personal or small-team local provenance: what an
+agent was allowed to touch on this machine, what it produced, and what a human
+has actually reviewed.
 
 ## Positioning Gap
 
-The opportunity is not another AI IDE, chat client, or workflow builder. The
-gap is a personal computer agent shell with:
+The opportunity is not another AI IDE, chat client, workflow builder, or
+general-purpose autonomous agent. The gap is a local trust and evidence layer
+for agentic work with:
 
-- A strong first-screen presence.
-- Natural-language task entry.
-- Plain progress.
-- Scoped permissions.
-- Local task history.
-- Durable artifacts.
-- Adapter-based execution.
-- Persona and voice customization.
+- Agent-agnostic supervised sessions.
+- Plain progress and user-safe timelines.
+- Scoped permissions and revocation.
+- Credential access by task and purpose.
+- Local task and session history.
+- Durable work packets.
+- Evidence receipts, claim ledgers, and known blind spots.
+- Human-attested review records.
+- Adapter-based execution and trace import.
 
 ## MVP Implication
 
 Start with a narrow workflow where correctness and trust can be evaluated:
 
 1. Deep research.
-2. Local document summarization.
-3. Sourced report generation.
+2. Sourced report generation.
+3. Project or coding-agent session review.
 
-Add browser and computer control only after the permission broker and audit
-trail are working.
+Add browser and computer control only after the permission broker, credential
+boundary, work-packet schema, and audit trail are working.

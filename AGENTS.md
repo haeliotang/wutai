@@ -2,10 +2,15 @@
 
 ## Product Boundary
 
-Wutai is a task-first personal computer agent shell for non-programmers. Keep
-the user-facing surface focused on tasks, permissions, progress, evidence, and
-artifacts. Do not expose MCP, skills, provider settings, terminal output, or
+Wutai is a local trust and evidence layer for agentic work on personal
+computers. Keep the user-facing surface focused on supervised sessions,
+permissions, credentials, progress, evidence, artifacts, audit trails, and
+human review. Do not expose MCP, skills, provider settings, terminal output, or
 tool traces as primary UX unless the task explicitly targets expert mode.
+
+Wutai should not be framed as the agent that does all work itself. It should
+supervise agentic work by recording what happened, controlling sensitive access,
+and producing durable work packets.
 
 ## Engineering Boundary
 
@@ -24,12 +29,22 @@ When possible, wrap external runtimes behind a Wutai-owned event contract:
 Backend capabilities must remain swappable. Do not bind the product model to a
 single provider, model, or agent runtime.
 
+For new integrations, prefer thin wrappers and proxies that preserve Wutai's
+local ledger and permission boundary:
+
+- CLI wrapper
+- MCP proxy
+- filesystem watcher
+- browser extension
+- keychain or credential broker
+- trace importer
+
 ## Safety Boundary
 
-Do not describe Wutai as "fully taking over the computer" without also stating
-the control boundary. The intended model is a permissioned computer agent:
-observable by default, scoped by task, stoppable by the user, and auditable
-after execution.
+Do not describe Wutai as "fully taking over the computer" or "running every
+agent locally" without also stating the control boundary. The intended model is
+a permissioned local supervision layer: observable by default, scoped by task,
+stoppable by the user, and auditable after execution.
 
 High-risk actions require explicit confirmation:
 
@@ -38,6 +53,10 @@ High-risk actions require explicit confirmation:
 - Installing software or changing system settings.
 - Making purchases or payments.
 - Sharing private data with external services.
+- Granting credentials or long-lived tokens to an external runtime.
+
+When an external runtime cannot enforce Wutai's permission boundary, document it
+as experimental and keep it out of the default non-expert path.
 
 ## Documentation Standard
 

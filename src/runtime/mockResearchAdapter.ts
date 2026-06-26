@@ -15,14 +15,14 @@ const sources: Array<Omit<SourceRecord, "sourceId" | "taskId">> = [
     note: "Deep research runtime candidate for v0.1.",
   },
   {
-    title: "browser-use",
-    url: "https://github.com/browser-use/browser-use",
-    note: "Browser automation candidate for v0.2.",
+    title: "Langfuse",
+    url: "https://github.com/langfuse/langfuse",
+    note: "Open-source LLM observability reference for traces and evaluation.",
   },
   {
-    title: "OpenAI Codex",
-    url: "https://github.com/openai/codex",
-    note: "Future coding and local execution adapter candidate.",
+    title: "Arize Phoenix",
+    url: "https://github.com/Arize-ai/phoenix",
+    note: "Open-source AI observability reference for tracing and evaluation.",
   },
   {
     title: "Tauri",
@@ -54,25 +54,28 @@ ${task.userRequest}
 
 ## Summary
 
-The first Wutai release should prove a narrow deep-research lifecycle before
-adding browser control, coding adapters, voice, or full computer-use features.
-The safest starting point is a Tauri desktop shell, a task and permission
-model, and a GPT Researcher adapter that emits Wutai task events.
+The first Wutai release should prove a narrow supervised research loop before
+adding direct browser control, coding-agent adapters, MCP proxying, or full
+computer-use features. The safest starting point is a Tauri desktop console, a
+task-scoped permission model, local work-packet storage, and a GPT Researcher
+adapter that emits Wutai task events.
 
-## Recommended v0.1 Stack
+## Recommended v0.1 Boundary
 
-- Desktop shell: Tauri.
-- UI: React and TypeScript.
+- Supervision console: Tauri plus React and TypeScript.
 - Local task state: SQLite through the Tauri SQL plugin, with localStorage only
   for browser preview and test runs.
 - Research runtime: GPT Researcher.
-- Future adapters: browser-use, Codex app-server, CUA, and Agent-S.
+- Evidence surface: report.md, sources.json, claims.json, verification.json,
+  and audit.json.
+- Future supervised-session wedges: coding-agent trace import, MCP proxy,
+  browser-use, Codex, CUA, and Agent-S.
 
 ## Product Boundary
 
 Wutai v0.1 should not expose MCP, skills, raw terminal output, provider setup,
 or runtime logs as the default user experience. It should show the task goal,
-plain progress, permissions, artifacts, and sources.
+plain progress, permissions, artifacts, source evidence, and review status.
 
 ## Sources
 
@@ -94,9 +97,9 @@ export async function runMockResearchAdapter(
 
   const steps = [
     "Preparing the research plan.",
-    "Searching public sources for relevant projects.",
+    "Searching public sources for relevant agent governance and observability tools.",
     "Reading selected source pages.",
-    "Comparing adapter candidates against the v0.1 scope.",
+    "Comparing supervision and evidence-layer candidates against the v0.1 scope.",
     "Drafting the Markdown report.",
   ];
 

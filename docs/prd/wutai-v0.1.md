@@ -1,19 +1,20 @@
 # Wutai v0.1 PRD
 
 Status: Draft for implementation planning  
-Last updated: 2026-06-19  
+Last updated: 2026-06-27
 Owner: haeliotang
 
 ## 1. Product Goal
 
 Wutai v0.1 proves one narrow product claim:
 
-> A non-programmer can open a desktop agent shell, describe a deep research
-> task in natural language, grant scoped web-research permission, observe
-> plain-language progress, and receive a durable sourced report.
+> A user can run a bounded agentic research task under local supervision, grant
+> scoped web-research permission, observe plain-language progress, and receive
+> a durable work packet with artifacts, sources, claims, evidence checks, and
+> an audit trail.
 
-v0.1 is not a general computer-control product. It is the first audited task
-lifecycle.
+v0.1 is not a general computer-control product and not a general agent
+orchestrator. It is the first audited supervised-session lifecycle.
 
 ## 2. Core Scenario
 
@@ -21,32 +22,34 @@ The v0.1 core scenario is:
 
 ```text
 User opens Wutai.
-User enters: "Research open-source personal computer agent projects and produce
-a short market comparison report."
+User enters: "Research agent work governance tools and produce a short market
+comparison report."
 Wutai restates the goal.
 Wutai proposes a research plan.
 Wutai asks for permission to use public web search and read public webpages.
 User approves.
 Wutai runs the research adapter.
 Wutai shows progress in plain language.
-Wutai generates a Markdown report with sources.
-User opens the report and reviews the task audit trail.
+Wutai generates a work packet: report, sources, claims, verification, and audit.
+User opens the work packet and reviews the evidence and task audit trail.
 ```
 
-The product succeeds only if the user does not need to understand agents,
-models, MCP, skills, browser automation, command lines, or workflow builders.
+The product succeeds only if the user can review what happened without
+understanding agents, models, MCP, skills, browser automation, command lines, or
+workflow builders.
 
 ## 3. Target User
 
 Primary v0.1 user:
 
-- Non-programmer doing information work on a desktop.
-- Comfortable asking AI for help, but not comfortable configuring agent tools.
-- Wants evidence and artifacts, not just a chat answer.
+- Power user or non-programmer doing information work on a desktop.
+- Comfortable asking AI for help, but not comfortable auditing raw agent logs.
+- Wants evidence, artifacts, and a local audit trail, not just a chat answer.
 
 Secondary user:
 
-- Power user who wants a cleaner shell over existing open-source agent tools.
+- Developer or maintainer who wants an early supervised-session loop over
+  agentic work.
 
 ## 4. Non-goals
 
@@ -58,14 +61,16 @@ v0.1 will not implement:
 - Voice cloning.
 - Plugin marketplace.
 - Multi-agent orchestration.
+- General-purpose MCP proxy.
+- Cross-agent credential broker.
 - Coding tasks.
 - Email sending, social posting, or form submission.
 - Destructive file operations.
 - Background execution across days.
 - PPT, PDF, or spreadsheet generation as required outputs.
 
-These may appear in later versions after the permission broker and audit trail
-are proven.
+These may appear in later versions after the permission broker, credential
+boundary, and audit trail are proven.
 
 ## 5. User Experience
 
@@ -76,9 +81,9 @@ The app opens to a minimal dark console:
 ```text
 WUTAI
 
-Your personal computer agent is in observe mode.
+Local supervision is in observe mode.
 
-> What should I handle for you?
+> What agent work should I supervise?
 ```
 
 The black-console style is visual identity, not a command-line contract. The
@@ -90,7 +95,7 @@ On first launch, Wutai explains:
 
 - It starts in observe mode.
 - It will ask before accessing web, files, browser, or system controls.
-- v0.1 can run public web research and generate local Markdown artifacts.
+- v0.1 can run supervised public web research and generate a local work packet.
 - The user can stop a task at any time.
 - Sensitive actions are unavailable in v0.1.
 
@@ -110,6 +115,7 @@ The default task view shows:
 - Pending permission request, if any.
 - Created artifacts.
 - Source count.
+- Evidence Gate status.
 - Stop button.
 
 Expert logs are collapsed by default.
@@ -140,6 +146,8 @@ When the task completes, Wutai shows:
 
 - Final report artifact.
 - Source list.
+- Claim ledger.
+- Evidence verification summary.
 - Permission summary.
 - Task timeline.
 - Any errors or skipped steps.
@@ -204,7 +212,7 @@ Raw runtime logs must not be the default experience.
 
 ### 6.6 Artifact Output
 
-The core artifact is Markdown:
+The core output is a work packet:
 
 - `artifacts/<task_id>/report.md`
 - `artifacts/<task_id>/sources.json`
@@ -225,6 +233,8 @@ The user can reopen a completed task and see:
 - Timeline.
 - Artifacts.
 - Sources.
+- Claims and evidence verification.
+- Audit metadata.
 
 ## 7. Technical Direction
 
@@ -244,6 +254,7 @@ contracts.
 | Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
+| External trace import | Not required in v0.1 | Add later for Claude Code, Codex, or other agent traces after the work-packet schema is stable. |
 | Computer use | Not required in v0.1 | Add later through CUA or Agent-S after stronger safety controls. |
 
 See [Adapter Shortlist](../research/adapter-shortlist-v0.1.md).
@@ -286,6 +297,8 @@ Minimum local tables:
 - `permission_requests`
 - `artifacts`
 - `sources`
+- `claims`
+- `evidence_verifications`
 - `settings`
 
 Minimum task states:
@@ -332,7 +345,9 @@ Blocked in v0.1:
 - Installing software.
 - Changing system settings.
 - Operating mouse or keyboard.
-- Accessing credentials.
+- Accessing arbitrary user secrets, wallets, passwords, or credential stores
+  outside configured Provider Profiles.
+- Passing raw provider keys to an unmediated external runtime.
 
 The stop button must be visible while a task is running.
 
@@ -351,7 +366,7 @@ The v0.1 core scenario is complete when:
 9. Progress appears as plain-language timeline events.
 10. The task creates `report.md`, `sources.json`, `claims.json`,
     `verification.json`, and `audit.json`.
-11. The completion view links to the artifact.
+11. The completion view links to the work packet.
 12. The user can reopen the task and inspect the audit trail.
 13. No default offline flow exposes MCP, skills, raw terminal output, or
     provider setup.
@@ -406,17 +421,17 @@ The v0.1 core scenario is complete when:
 
 v0.2 candidates:
 
-- browser-use adapter for direct browser workflows.
-- PDF export.
+- Work-packet schema hardening for sessions beyond research.
+- CLI wrapper or trace importer for one external coding-agent workflow.
 - Local file ingestion for user-selected files.
-- Persona/theme settings.
+- PDF export.
 
 v0.3 candidates:
 
-- Codex app-server adapter for local code or file tasks.
-- Voice output.
-- Multi-step task resume.
-- Rich artifact library.
+- MCP proxy or tool-call recorder for supervised agent sessions.
+- Credential broker for task-scoped provider access.
+- Codex, Claude Code, or similar coding-agent adapter.
+- Rich artifact and audit library.
 
 Later candidates:
 
@@ -424,6 +439,7 @@ Later candidates:
 - n8n or Activepieces workflow automation adapter.
 - Stronger policy engine for high-risk actions.
 - User-created task templates.
+- Mobile approval companion for high-risk confirmations.
 
 ## 12. Open Questions
 
@@ -432,3 +448,5 @@ Later candidates:
 - Should generated artifacts live in the repo-style `artifacts/` folder or an
   OS app-data directory by default?
 - What is the minimum acceptable source-quality filter for generated reports?
+- What is the smallest cross-agent work-packet schema that can support research,
+  coding, browser work, and local scripts without becoming enterprise telemetry?

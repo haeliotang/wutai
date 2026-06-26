@@ -1,71 +1,88 @@
 # Wutai
 
-Wutai is a personal computer agent shell: a customizable, voice-enabled,
-task-first desktop layer that helps non-programmers delegate complex computer
-work while keeping permissions, evidence, and final artifacts under their
-control.
+Wutai is a local trust and evidence layer for agentic work on personal
+computers. It records what agents did, controls what they can access, and turns
+their outputs into verifiable artifacts.
 
-The project is not trying to build another AI IDE, another chat client, or
-another workflow-builder UI. Wutai's product bet is that the next personal
-computer interface is organized around tasks, not apps, and that advanced
-agent capabilities should be hidden behind a calm, understandable control
-surface.
+Wutai is not trying to be another agent that does the work itself, another AI
+IDE, another chat client, or another workflow-builder UI. The product bet is
+that agents will run across many surfaces -- local apps, cloud browsers,
+coding tools, MCP servers, and model-provider runtimes -- but work that touches
+the user's files, credentials, browser state, or durable outputs still needs a
+local trust boundary owned by the user.
+
+The current repository is a v0.1 scaffold. It implements one supervised
+research workflow and uses that workflow to prove the local ledger, permission,
+artifact, and Evidence Gate loop. It does not yet supervise arbitrary external
+agents.
 
 ## Product Principles
 
-- Task-first: users describe outcomes, not tools, prompts, or protocols.
+- Agent-agnostic: Wutai should supervise work from many agent runtimes instead
+  of competing to be the only agent application.
 - Permissioned: every sensitive capability is explicit, scoped, reversible, and
   auditable.
+- Credential-minimizing: agents should receive task-scoped access, not
+  permanent secrets or broad ambient authority.
 - Artifact-centered: the main output is a durable report, deck, spreadsheet,
-  automation, file set, or decision record, not a transient chat answer.
+  automation, file set, code diff, or decision record, not a transient chat
+  answer.
+- Evidence-first: important claims and work products should carry sources,
+  hashes, audit trails, blind spots, and review status.
 - Adapter-first: reuse open-source runtimes and tools instead of rebuilding
   browser automation, research agents, coding agents, file parsers, or speech
   engines.
-- Personal: the shell can have a custom visual style, name, voice, and behavior
-  profile, while the safety model remains clear and predictable.
+- Human-attested: Wutai can surface risk and evidence, but important alignment
+  judgments belong to a named human reviewer.
 
 ## What Wutai Should Feel Like
 
-The first screen should feel like a private computer agent has booted on the
+The first screen should feel like a local supervision console has booted on the
 user's machine:
 
 ```text
 WUTAI
 
-> What should I handle for you?
+> What agent work should I supervise?
 ```
 
 The UI can use a dark terminal-inspired visual language, but it must not behave
 like a programmer terminal. Users should speak in natural language. Wutai should
 translate complex backend activity into plain status updates, permission
-requests, and final artifacts.
+requests, evidence warnings, and final work packets.
 
 ## Initial Scope
 
-The first useful version should prove one thing: a non-programmer can start a
-long-running computer task, understand what the agent is doing, approve
-sensitive steps, and receive a durable artifact.
+The first useful version should prove one thing: a user can run a bounded agent
+task under local supervision, understand what was allowed, inspect what
+happened, and keep a verifiable work packet after completion.
 
-Candidate first workflows:
+The v0.1 implementation proves this with a sourced research workflow. A
+completed real research task writes:
 
-- Research a topic and produce a sourced report.
-- Read a folder of files and generate a structured summary.
-- Compare products, projects, or competitors and produce a decision memo.
-- Generate a presentation outline or editable document from collected sources.
+- `report.md`
+- `sources.json`
+- `claims.json`
+- `verification.json`
+- `audit.json`
+
+Future supervised-session adapters can apply the same ledger to coding agents,
+browser agents, computer-use runtimes, and local scripts.
 
 ## Architecture Direction
 
 ```text
-Custom UI Shell
-  -> Persona and Voice Layer
-  -> Task OS Layer
-  -> Agent Adapter Layer
-  -> Local Permission Broker
-  -> Open-source runtimes and tools
+Desktop Supervision Console
+  -> Supervised Session Ledger
+  -> Permission and Credential Broker
+  -> Agent Adapter / Proxy Layer
+  -> Evidence and Artifact Gate
+  -> External agent runtimes and tools
 ```
 
-Wutai should own the user experience, task lifecycle, permission model, and
-adapter contract. It should reuse proven projects for execution.
+Wutai should own the local event ledger, task/session lifecycle, permission
+model, credential boundary, evidence model, artifact model, and adapter
+contract. It should reuse proven projects for execution.
 
 See:
 
@@ -196,13 +213,37 @@ without calling external APIs.
 
 ## Repository Status
 
-This repository contains the first runnable Wutai shell scaffold. It includes
-task creation, task-scoped permission, local persistence, artifact writing, an
-offline mock research adapter, and an optional GPT Researcher sidecar with
-Provider Profiles, Evidence Gate artifacts, and keychain-backed setup
-preflight.
-It does not yet implement browser-use, Codex app-server integration, full
-computer-use control, voice, or production packaging.
+This repository contains the first runnable Wutai local trust-layer scaffold. It
+includes task creation, task-scoped permission, local persistence, artifact
+writing, an offline mock research adapter, and an optional GPT Researcher
+sidecar with Provider Profiles, Evidence Gate artifacts, keychain-backed setup
+preflight, redacted expert logs, and task-scoped sidecar cancellation.
+
+Implemented behavior:
+
+- One supervised research task lifecycle.
+- Task-scoped public web-research permission.
+- Local task history and app-data artifact writing.
+- Provider Profile metadata plus system-keychain secrets.
+- Evidence Gate claim extraction and deterministic verification summaries.
+- `audit.json` with permission, event, provider, and sidecar-log context.
+
+Planned behavior:
+
+- Supervised sessions for external coding agents, browser agents, local
+  scripts, and MCP tools.
+- A permission and credential broker that can sit in front of external agent
+  runtimes.
+- A general work-packet format for cross-agent audit, provenance, and
+  human-attested review.
+
+Not implemented:
+
+- Browser-use, Codex app-server, Claude Code, MCP-proxy, or full computer-use
+  supervision.
+- Production packaging.
+- Mobile approval companion.
+- Voice or persona customization.
 
 ## License
 

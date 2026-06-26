@@ -23,7 +23,7 @@ import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
 const CORE_SCENARIO =
-  "Research open-source personal computer agent projects and produce a short market comparison report.";
+  "Research agent work governance tools and produce a short market comparison report.";
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -458,10 +458,10 @@ export default function App() {
     <main className="app-shell">
       <section className="hero-console">
         <div className="system-line">WUTAI / OBSERVE MODE</div>
-        <h1>Personal computer agent shell</h1>
+        <h1>Local trust layer for agentic work</h1>
         <p>
-          v0.1 scaffold. Natural-language task entry, task-scoped permission,
-          auditable research progress, and local artifact preview.
+          v0.1 scaffold. Supervised research sessions, task-scoped permission,
+          auditable progress, Evidence Gate checks, and local work packets.
         </p>
         <p className="runtime-line">
           Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
