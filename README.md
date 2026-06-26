@@ -1,75 +1,86 @@
 # Wutai
 
 Wutai is a local trust and evidence layer for agentic work on personal
-computers. It records what agents did, controls what they can access, and turns
-their outputs into verifiable artifacts.
+computers.
 
-Wutai is not trying to be another agent that does the work itself, another AI
-IDE, another chat client, or another workflow-builder UI. The product bet is
-that agents will run across many surfaces -- local apps, cloud browsers,
-coding tools, MCP servers, and model-provider runtimes -- but work that touches
-the user's files, credentials, browser state, or durable outputs still needs a
-local trust boundary owned by the user.
+It is designed for the point where an agent stops being a chat answer and starts
+touching local files, provider credentials, browser state, source material, or
+durable work products. Wutai's job is to make that work permissioned,
+auditable, stoppable, and reviewable.
 
-The current repository is a v0.1 scaffold. It implements one supervised
-research workflow and uses that workflow to prove the local ledger, permission,
-artifact, and Evidence Gate loop. It does not yet supervise arbitrary external
-agents.
+> Repository status: v0.1 scaffold. The current code implements one supervised
+> research workflow. It does not yet supervise arbitrary external agents,
+> browser-control runtimes, MCP tools, coding agents, or full computer-use
+> sessions.
 
-## Product Principles
+## Why This Exists
 
-- Agent-agnostic: Wutai should supervise work from many agent runtimes instead
-  of competing to be the only agent application.
-- Permissioned: every sensitive capability is explicit, scoped, reversible, and
-  auditable.
-- Credential-minimizing: agents should receive task-scoped access, not
-  permanent secrets or broad ambient authority.
-- Artifact-centered: the main output is a durable report, deck, spreadsheet,
-  automation, file set, code diff, or decision record, not a transient chat
-  answer.
-- Evidence-first: important claims and work products should carry sources,
-  hashes, audit trails, blind spots, and review status.
-- Adapter-first: reuse open-source runtimes and tools instead of rebuilding
-  browser automation, research agents, coding agents, file parsers, or speech
-  engines.
-- Human-attested: Wutai can surface risk and evidence, but important alignment
-  judgments belong to a named human reviewer.
+Agentic work is becoming fragmented across model providers, coding tools,
+browser agents, local scripts, MCP servers, and OS-level assistants. Each
+runtime can have its own logs, permissions, credentials, and artifacts.
 
-## What Wutai Should Feel Like
+Wutai's product thesis is that users still need a local trust boundary they
+control:
 
-The first screen should feel like a local supervision console has booted on the
-user's machine:
+- What did the agent ask to access?
+- What did the user approve or deny?
+- Which provider profile or credential purpose was used?
+- Which sources, claims, logs, and artifacts were produced?
+- Which parts are verified, weakly supported, or still require human review?
+
+Wutai is not trying to be the agent that does every task. It is the local layer
+that records, scopes, and verifies agentic work.
+
+## Current Implementation
+
+The v0.1 scaffold proves this loop with a bounded research workflow:
 
 ```text
-WUTAI
-
-> What agent work should I supervise?
+natural-language task
+  -> generated plan
+  -> task-scoped permission
+  -> research adapter progress
+  -> work packet
+  -> Evidence Gate review
+  -> local task history
 ```
 
-The UI can use a dark terminal-inspired visual language, but it must not behave
-like a programmer terminal. Users should speak in natural language. Wutai should
-translate complex backend activity into plain status updates, permission
-requests, evidence warnings, and final work packets.
+Implemented:
 
-## Initial Scope
+- Tauri 2 desktop shell with React and TypeScript UI.
+- Local task history through SQLite in Tauri and `localStorage` in web preview.
+- Task-scoped public web-research permission.
+- Offline mock research adapter for deterministic local development and e2e
+  tests.
+- Optional GPT Researcher Python sidecar for real research tasks.
+- Provider Profiles for model, search, and embedding configuration.
+- System-keychain storage for provider access keys through `keyring-rs`.
+- Sidecar setup preflight and task-scoped sidecar cancellation.
+- Redacted expert logs captured into `audit.json`.
+- Evidence Gate v0.1 with claim extraction, source-tier classification, and
+  deterministic verification summaries.
 
-The first useful version should prove one thing: a user can run a bounded agent
-task under local supervision, understand what was allowed, inspect what
-happened, and keep a verifiable work packet after completion.
+Each completed real research task writes a local work packet:
 
-The v0.1 implementation proves this with a sourced research workflow. A
-completed real research task writes:
+```text
+report.md
+sources.json
+claims.json
+verification.json
+audit.json
+```
 
-- `report.md`
-- `sources.json`
-- `claims.json`
-- `verification.json`
-- `audit.json`
+Not implemented:
 
-Future supervised-session adapters can apply the same ledger to coding agents,
-browser agents, computer-use runtimes, and local scripts.
+- General supervised sessions for arbitrary external agents.
+- MCP proxy or tool-call recorder.
+- Browser-use, Codex, Claude Code, or full computer-use supervision.
+- Cross-agent credential broker.
+- Mobile approval companion.
+- Production packaging.
+- Voice or persona customization.
 
-## Architecture Direction
+## Architecture
 
 ```text
 Desktop Supervision Console
@@ -80,30 +91,26 @@ Desktop Supervision Console
   -> External agent runtimes and tools
 ```
 
-Wutai should own the local event ledger, task/session lifecycle, permission
-model, credential boundary, evidence model, artifact model, and adapter
-contract. It should reuse proven projects for execution.
+Current v0.1 only implements the research-adapter slice of this architecture.
+The broader adapter/proxy layers are planned boundaries, not shipped behavior.
 
-See:
+Key design documents:
 
 - [Product Brief](docs/product-brief.md)
 - [MVP Definition](docs/mvp.md)
 - [Architecture](docs/architecture.md)
 - [Security Model](docs/security-model.md)
-- [Persona and Voice](docs/persona-and-voice.md)
 - [Wutai v0.1 PRD](docs/prd/wutai-v0.1.md)
 - [v0.1 Scaffold Technical Design](docs/technical-design/v0.1-scaffold.md)
 - [Market Scan](docs/research/market-scan.md)
 
-## Development
+## Quick Start
 
 Prerequisites:
 
-- Node.js
-- npm
+- Node.js and npm
 - Rust and Cargo
-- Python 3.11 through 3.13 for the optional GPT Researcher sidecar; 3.13 is
-  recommended
+- Python 3.11 through 3.13 for the optional GPT Researcher sidecar
 
 Install dependencies:
 
@@ -111,19 +118,21 @@ Install dependencies:
 npm install
 ```
 
-Run the web shell:
+Run the web preview with the offline mock adapter:
 
 ```bash
 npm run dev
 ```
 
-Run the Tauri shell:
+Run the Tauri desktop shell:
 
 ```bash
 npm run tauri dev
 ```
 
-Run the Tauri shell with the optional GPT Researcher sidecar:
+## Optional Real Research Adapter
+
+The real research path uses a Python sidecar and is opt-in:
 
 ```bash
 python3.13 -m venv .venv
@@ -135,42 +144,28 @@ VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher npm run tauri dev
 Wutai automatically prefers the project `.venv`. Set
 `WUTAI_GPT_RESEARCHER_PYTHON` only to override that interpreter.
 
-Verify the installed sidecar without API keys or network research:
+When the GPT Researcher adapter is enabled, Wutai checks:
+
+- Python availability and supported version.
+- Sidecar script availability.
+- `gpt-researcher` package availability.
+- Active Provider Profile validity.
+- Required model, search, and embedding access.
+- Ollama endpoint reachability when Ollama is selected.
+
+Provider metadata is stored in the app-data directory. Secret values are stored
+separately in the system keychain and scoped by profile, provider, and purpose.
+The developer environment variables `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, and
+`TAVILY_API_KEY` remain available as fallbacks.
+
+Verify the optional sidecar environment without API keys or network research:
 
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml \
   installed_gpt_researcher_sidecar_smoke -- --ignored
 ```
 
-Then open Research setup in the app and choose a Provider Profile. Model,
-search, and embedding providers are configured independently. The current UI
-supports DeepSeek, OpenAI, OpenAI-compatible endpoints, and Ollama for models;
-Tavily or DuckDuckGo for search; and OpenAI-compatible or Ollama embeddings.
-The default profile is DeepSeek + Tavily + local Ollama embeddings.
-
-Profile metadata is stored in the app-data directory. API keys are stored
-separately in the system keychain through `keyring-rs` and are scoped by
-profile, provider, and purpose. Developers can still use `DEEPSEEK_API_KEY`,
-`OPENAI_API_KEY`, and `TAVILY_API_KEY` as environment-variable fallbacks.
-
-Without `VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher`, Wutai keeps using the
-offline mock adapter for local development and e2e tests.
-
-When the GPT Researcher adapter is enabled, Wutai runs a startup setup check
-for Python, the sidecar script, the `gpt-researcher` package, the active
-Provider Profile, required access keys, and a configured Ollama endpoint when
-used. If setup is incomplete, Wutai blocks new real research tasks and shows
-the missing steps in the app. While a real research task is running, Stop
-asks Tauri to terminate the Python sidecar process for that task. Sidecar stderr
-logs stream through a Tauri IPC Channel into expert-only task events and stay
-hidden from the default timeline. Structured sidecar stages provide stable
-plain-language progress for normal users. Task history keeps at most 200 expert
-log events; `audit.json` retains every captured, redacted, per-line-bounded log
-entry. Evidence Gate v0.1 extracts a structured claim ledger after report
-generation, classifies captured source provenance with deterministic rules, and
-marks tasks that need evidence review instead of presenting every generated
-report as fully trusted. Each real research task writes `report.md`,
-`sources.json`, `claims.json`, `verification.json`, and `audit.json`.
+## Verification
 
 Build the frontend:
 
@@ -178,7 +173,7 @@ Build the frontend:
 npm run build
 ```
 
-Run the core scenario e2e test:
+Run the Playwright e2e tests:
 
 ```bash
 npm run test:e2e
@@ -190,7 +185,7 @@ Run the Provider Profiles UI contract test:
 npm run test:e2e:providers
 ```
 
-Run the offline Evidence Gate regressions:
+Run the Evidence Gate regressions:
 
 ```bash
 npm run test:evidence
@@ -202,48 +197,43 @@ Run the desktop command and IPC tests:
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-These Rust tests use Tauri's official mock runtime and an in-memory credential
-store, never the user's system keychain. They cover profile validation,
-provider-to-runtime mapping, provider-key precedence, setup preflight and
-process cancellation through the Tauri invoke handler, plus the streaming
-stderr parser; Playwright covers the default offline task flow and the
-Provider Profiles UI at desktop minimum width. Python unit tests cover source
-classification, evidence warnings, and locked OpenClaw/Multica license facts
-without calling external APIs.
+The Rust tests use Tauri's mock runtime and an in-memory credential store. They
+do not read or write the user's system keychain. The Python tests do not call
+external model or search APIs.
 
-## Repository Status
+## Development Boundaries
 
-This repository contains the first runnable Wutai local trust-layer scaffold. It
-includes task creation, task-scoped permission, local persistence, artifact
-writing, an offline mock research adapter, and an optional GPT Researcher
-sidecar with Provider Profiles, Evidence Gate artifacts, keychain-backed setup
-preflight, redacted expert logs, and task-scoped sidecar cancellation.
+Wutai keeps a strict distinction between implemented behavior and roadmap
+direction:
 
-Implemented behavior:
+- Adapters must translate runtime output into Wutai events before it reaches the
+  default UI.
+- Runtime logs are expert context, not the primary user experience.
+- Evidence Gate results are review aids, not guarantees that every statement is
+  true.
+- External runtimes that cannot enforce Wutai's permission boundary must remain
+  experimental and out of the default path.
+- Do not claim support for browser-use, Codex, Claude Code, MCP proxying, or
+  full computer-use supervision until there is code, configuration, and a
+  runnable verification path in this repository.
 
-- One supervised research task lifecycle.
-- Task-scoped public web-research permission.
-- Local task history and app-data artifact writing.
-- Provider Profile metadata plus system-keychain secrets.
-- Evidence Gate claim extraction and deterministic verification summaries.
-- `audit.json` with permission, event, provider, and sidecar-log context.
+## Roadmap
 
-Planned behavior:
+Near-term engineering work:
 
-- Supervised sessions for external coding agents, browser agents, local
-  scripts, and MCP tools.
-- A permission and credential broker that can sit in front of external agent
-  runtimes.
-- A general work-packet format for cross-agent audit, provenance, and
-  human-attested review.
+- Harden the work-packet schema beyond research reports.
+- Add an official-source-first research pass before final Evidence Gate review.
+- Add one external-agent supervision wedge, likely a CLI wrapper or trace
+  importer, before direct desktop control.
+- Define the minimal credential-broker boundary for task-scoped provider access.
 
-Not implemented:
+Longer-term candidates:
 
-- Browser-use, Codex app-server, Claude Code, MCP-proxy, or full computer-use
-  supervision.
-- Production packaging.
-- Mobile approval companion.
-- Voice or persona customization.
+- MCP proxy or tool-call recorder.
+- Browser-agent supervision.
+- Coding-agent trace import or adapter.
+- Computer-use supervision after stronger safety controls.
+- Mobile approval companion for high-risk confirmations.
 
 ## License
 
