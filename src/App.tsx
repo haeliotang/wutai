@@ -19,12 +19,36 @@ import {
   type SearchProvider,
 } from "./runtime/researchProviderSetup";
 import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
+import { importCliPacketFiles } from "./runtime/cliPacketImporter";
 import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
 const CORE_SCENARIO =
   "Research agent work governance tools and produce a short market comparison report.";
+
+interface CliPolicyArtifact {
+  decision?: string;
+  highestSeverity?: string;
+  matchedRules?: Array<{ ruleId?: string; message?: string }>;
+  summary?: string;
+}
+
+interface CliTraceArtifact {
+  command?: string;
+  workingDirectory?: string;
+  exitCode?: number;
+  executed?: boolean;
+  stdoutSummary?: string;
+  stderrSummary?: string;
+}
+
+interface WorkPacketManifestArtifact {
+  packetType?: string;
+  producer?: { adapter?: string };
+  audit?: { policyDecision?: string; toolCallCount?: number; runtimeEventCount?: number };
+  session?: { command?: string | null; exitCode?: number | null };
+}
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -47,6 +71,14 @@ function downloadArtifact(name: string, content: string) {
   link.download = name;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function parseJsonArtifact<T>(content: string): T | null {
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    return null;
+  }
 }
 
 function newProviderProfile(): ResearchProviderProfile {
@@ -86,6 +118,7 @@ export default function App() {
   );
   const [providerSetupSaving, setProviderSetupSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -304,6 +337,26 @@ export default function App() {
     [activeTask],
   );
 
+  const policyArtifact = useMemo(
+    () => activeTask?.artifacts.find((item) => item.name === "policy.json") ?? null,
+    [activeTask],
+  );
+
+  const traceArtifact = useMemo(
+    () => activeTask?.artifacts.find((item) => item.name === "trace.json") ?? null,
+    [activeTask],
+  );
+
+  const ledgerArtifact = useMemo(
+    () => activeTask?.artifacts.find((item) => item.name === "ledger.json") ?? null,
+    [activeTask],
+  );
+
+  const auditArtifact = useMemo(
+    () => activeTask?.artifacts.find((item) => item.name === "audit.json") ?? null,
+    [activeTask],
+  );
+
   const verificationArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "verification.json") ??
@@ -315,6 +368,26 @@ export default function App() {
     const artifact = verificationArtifact;
     return artifact ? parseEvidenceVerification(artifact.content) : null;
   }, [verificationArtifact]);
+
+  const cliPacketReview = useMemo(() => {
+    if (!manifestArtifact || !policyArtifact || !traceArtifact) return null;
+
+    const manifest = parseJsonArtifact<WorkPacketManifestArtifact>(
+      manifestArtifact.content,
+    );
+    if (
+      manifest?.packetType !== "local_script" ||
+      manifest.producer?.adapter !== "wutaiRunCli"
+    ) {
+      return null;
+    }
+
+    return {
+      manifest,
+      policy: parseJsonArtifact<CliPolicyArtifact>(policyArtifact.content),
+      trace: parseJsonArtifact<CliTraceArtifact>(traceArtifact.content),
+    };
+  }, [manifestArtifact, policyArtifact, traceArtifact]);
 
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
@@ -360,6 +433,26 @@ export default function App() {
     setError(null);
     const task = await importLocalScriptTrace(artifactWriter);
     await persist(task);
+  }
+
+  async function importCliPacketFromFiles(files: FileList | null) {
+    if (!taskStore || !files || files.length === 0) return;
+
+    setError(null);
+    try {
+      const task = await importCliPacketFiles(Array.from(files));
+      await persist(task);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not import the CLI packet.",
+      );
+    } finally {
+      if (cliPacketInputRef.current) {
+        cliPacketInputRef.current.value = "";
+      }
+    }
   }
 
   async function resolvePermission(status: "approved" | "denied") {
@@ -480,8 +573,8 @@ export default function App() {
         <h1>Local trust layer for agentic work</h1>
         <p>
           v0.2 foundation. Supervised research sessions, local-script trace
-          import, task-scoped permission, Evidence Gate checks, and local work
-          packets.
+          import, CLI packet review, task-scoped permission, Evidence Gate
+          checks, and local work packets.
         </p>
         <p className="runtime-line">
           Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
@@ -547,11 +640,26 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => cliPacketInputRef.current?.click()}
+            >
+              Import CLI packet
+            </button>
+            <button
+              type="button"
               onClick={stopTask}
               disabled={activeTask?.status !== "running"}
             >
               Stop
             </button>
+            <input
+              ref={cliPacketInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="CLI packet files"
+              accept=".json,.md"
+              multiple
+              onChange={(event) => void importCliPacketFromFiles(event.target.files)}
+            />
           </div>
           {error && <p className="error-text">{error}</p>}
 
@@ -1025,6 +1133,73 @@ export default function App() {
                 </section>
               )}
 
+              {cliPacketReview && (
+                <section className="cli-review-section" aria-label="CLI Packet Review">
+                  <div className="panel-header">
+                    <h2>CLI Packet Review</h2>
+                    <strong>{cliPacketReview.policy?.decision ?? "unknown"}</strong>
+                  </div>
+                  <div className="cli-review-grid">
+                    <div>
+                      <span>Policy</span>
+                      <strong>{cliPacketReview.policy?.highestSeverity ?? "unknown"}</strong>
+                    </div>
+                    <div>
+                      <span>Exit</span>
+                      <strong>
+                        {cliPacketReview.trace?.exitCode ??
+                          cliPacketReview.manifest.session?.exitCode ??
+                          "n/a"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Tool calls</span>
+                      <strong>{cliPacketReview.manifest.audit?.toolCallCount ?? 0}</strong>
+                    </div>
+                    <div>
+                      <span>Runtime events</span>
+                      <strong>
+                        {cliPacketReview.manifest.audit?.runtimeEventCount ?? 0}
+                      </strong>
+                    </div>
+                  </div>
+                  <p>
+                    {cliPacketReview.trace?.command ??
+                      cliPacketReview.manifest.session?.command ??
+                      "Command unavailable"}
+                  </p>
+                  {cliPacketReview.policy?.matchedRules?.length ? (
+                    <div className="cli-rule-list">
+                      {cliPacketReview.policy.matchedRules.map((rule, index) => (
+                        <div key={`${rule.ruleId ?? "rule"}_${index}`}>
+                          <span className="preflight-status preflight-warning">
+                            {rule.ruleId ?? "rule"}
+                          </span>
+                          <p>{rule.message ?? "Matched policy rule."}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">No policy rules matched this packet.</p>
+                  )}
+                  <div className="evidence-actions">
+                    {[policyArtifact, traceArtifact, ledgerArtifact, auditArtifact]
+                      .filter(Boolean)
+                      .map((artifact) => (
+                        <button
+                          key={artifact!.artifactId}
+                          type="button"
+                          onClick={() =>
+                            downloadArtifact(artifact!.name, artifact!.content)
+                          }
+                        >
+                          Download {artifact!.name}
+                        </button>
+                      ))}
+                  </div>
+                </section>
+              )}
+
               {reportArtifact && (
                 <section className="artifact-section">
                   <div className="panel-header">
@@ -1061,8 +1236,8 @@ export default function App() {
             <div className="empty-state">
               <h2>Ready</h2>
               <p>
-                Create the core research task or import a local script trace to
-                test the work-packet flow.
+                Create the core research task, import a local script trace, or
+                review a CLI packet.
               </p>
             </div>
           )}

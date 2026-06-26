@@ -72,6 +72,9 @@ Implemented:
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs rule-based policy preflight, records exit code and git-status delta, and
   writes a local work packet.
+- Desktop review import for CLI wrapper packets. Select the packet's
+  `manifest.json` plus sibling artifacts to add the run to local task history
+  and inspect policy, trace, ledger, and audit artifacts.
 
 Each completed research task writes a local work packet:
 
@@ -195,6 +198,12 @@ network or filesystem access, or enforce a complete destructive-command policy.
 The policy rule set is intentionally small. It is a verified local execution
 ledger, not a full permission broker.
 
+To review a generated packet in the app, open the web preview or Tauri shell,
+choose `Import CLI packet`, and select `manifest.json`, `report.md`,
+`policy.json`, `trace.json`, `ledger.json`, and `audit.json` from the packet
+directory. The import is review-only; the desktop UI does not re-run the
+command.
+
 ## Optional Real Research Adapter
 
 The real research path uses a Python sidecar and is opt-in:
@@ -296,7 +305,8 @@ Near-term engineering work:
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Extend CLI policy preflight beyond the current small high-risk rule set.
-- Add desktop UI import/review for CLI wrapper packets.
+- Extend desktop CLI packet review toward directory import and richer audit
+  browsing.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:
