@@ -50,6 +50,38 @@ interface WorkPacketManifestArtifact {
   session?: { command?: string | null; exitCode?: number | null };
 }
 
+interface CliIntegrityArtifact {
+  status?: "passed" | "failed" | "incomplete";
+  summary?: string;
+  importMode?: "directory" | "files";
+  metrics?: {
+    total?: number;
+    passed?: number;
+    mismatched?: number;
+    missing?: number;
+    unverifiable?: number;
+  };
+  checks?: Array<{
+    name?: string;
+    role?: string;
+    expectedSha256?: string;
+    actualSha256?: string;
+    expectedBytes?: number;
+    actualBytes?: number;
+    status?: "passed" | "mismatch" | "missing" | "unverifiable";
+    message?: string;
+  }>;
+  limitation?: string;
+}
+
+interface CliAuditArtifact {
+  permissions?: Array<Record<string, unknown>>;
+  events?: Array<Record<string, unknown>>;
+  toolCalls?: Array<Record<string, unknown>>;
+  runtimeEvents?: Array<Record<string, unknown>>;
+  credentialGrants?: Array<Record<string, unknown>>;
+}
+
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
@@ -79,6 +111,65 @@ function parseJsonArtifact<T>(content: string): T | null {
   } catch {
     return null;
   }
+}
+
+function shortHash(value?: string) {
+  if (!value) return "n/a";
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function formatAuditValue(value: unknown) {
+  if (value === null || value === undefined) return "n/a";
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join(", ") || "n/a";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+interface AuditRecordListProps {
+  title: string;
+  records?: Array<Record<string, unknown>>;
+  fields: Array<{ key: string; label: string }>;
+}
+
+function AuditRecordList({ title, records, fields }: AuditRecordListProps) {
+  const items = records ?? [];
+
+  return (
+    <details className="audit-detail-group" open={items.length > 0}>
+      <summary>
+        <span>{title}</span>
+        <strong>{items.length}</strong>
+      </summary>
+      {items.length ? (
+        <div className="audit-record-list">
+          {items.map((item, index) => (
+            <div className="audit-record" key={`${title}_${index}`}>
+              <strong>
+                {formatAuditValue(
+                  item.summary ?? item.command ?? item.type ?? item.kind ?? `Record ${index + 1}`,
+                )}
+              </strong>
+              <dl>
+                {fields.map(({ key, label }) => (
+                  <div key={key}>
+                    <dt>{label}</dt>
+                    <dd>{formatAuditValue(item[key])}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">None recorded.</p>
+      )}
+    </details>
+  );
 }
 
 function newProviderProfile(): ResearchProviderProfile {
@@ -119,6 +210,7 @@ export default function App() {
   const [providerSetupSaving, setProviderSetupSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
+  const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -152,6 +244,14 @@ export default function App() {
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const input = cliPacketDirectoryInputRef.current;
+    if (!input) return;
+
+    input.setAttribute("webkitdirectory", "");
+    input.setAttribute("directory", "");
   }, []);
 
   async function runPreflight(adapter: ResearchAdapter): Promise<ResearchPreflight> {
@@ -357,6 +457,13 @@ export default function App() {
     [activeTask],
   );
 
+  const integrityArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "integrity.json") ??
+      null,
+    [activeTask],
+  );
+
   const verificationArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "verification.json") ??
@@ -386,8 +493,14 @@ export default function App() {
       manifest,
       policy: parseJsonArtifact<CliPolicyArtifact>(policyArtifact.content),
       trace: parseJsonArtifact<CliTraceArtifact>(traceArtifact.content),
+      audit: auditArtifact
+        ? parseJsonArtifact<CliAuditArtifact>(auditArtifact.content)
+        : null,
+      integrity: integrityArtifact
+        ? parseJsonArtifact<CliIntegrityArtifact>(integrityArtifact.content)
+        : null,
     };
-  }, [manifestArtifact, policyArtifact, traceArtifact]);
+  }, [auditArtifact, integrityArtifact, manifestArtifact, policyArtifact, traceArtifact]);
 
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
@@ -642,7 +755,13 @@ export default function App() {
               type="button"
               onClick={() => cliPacketInputRef.current?.click()}
             >
-              Import CLI packet
+              Import CLI packet files
+            </button>
+            <button
+              type="button"
+              onClick={() => cliPacketDirectoryInputRef.current?.click()}
+            >
+              Import CLI packet directory
             </button>
             <button
               type="button"
@@ -657,6 +776,14 @@ export default function App() {
               className="file-input-hidden"
               aria-label="CLI packet files"
               accept=".json,.md"
+              multiple
+              onChange={(event) => void importCliPacketFromFiles(event.target.files)}
+            />
+            <input
+              ref={cliPacketDirectoryInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="CLI packet directory"
               multiple
               onChange={(event) => void importCliPacketFromFiles(event.target.files)}
             />
@@ -1182,8 +1309,121 @@ export default function App() {
                   ) : (
                     <p className="muted">No policy rules matched this packet.</p>
                   )}
+
+                  {cliPacketReview.integrity && (
+                    <div
+                      className={`integrity-panel integrity-${cliPacketReview.integrity.status ?? "incomplete"}`}
+                    >
+                      <div className="panel-header">
+                        <h3>Manifest Integrity</h3>
+                        <strong>{cliPacketReview.integrity.status ?? "incomplete"}</strong>
+                      </div>
+                      <p>{cliPacketReview.integrity.summary ?? "Integrity check unavailable."}</p>
+                      <div className="integrity-metrics">
+                        <span>
+                          Passed{" "}
+                          <strong>{cliPacketReview.integrity.metrics?.passed ?? 0}</strong>
+                        </span>
+                        <span>
+                          Mismatch{" "}
+                          <strong>
+                            {cliPacketReview.integrity.metrics?.mismatched ?? 0}
+                          </strong>
+                        </span>
+                        <span>
+                          Missing{" "}
+                          <strong>{cliPacketReview.integrity.metrics?.missing ?? 0}</strong>
+                        </span>
+                        <span>
+                          Unverified{" "}
+                          <strong>
+                            {cliPacketReview.integrity.metrics?.unverifiable ?? 0}
+                          </strong>
+                        </span>
+                      </div>
+                      <div className="integrity-check-list">
+                        {cliPacketReview.integrity.checks?.map((check, index) => (
+                          <div key={`${check.name ?? "artifact"}_${index}`}>
+                            <span
+                              className={`integrity-status integrity-check-${check.status ?? "unverifiable"}`}
+                            >
+                              {check.status ?? "unverifiable"}
+                            </span>
+                            <div>
+                              <strong>{check.name ?? "unknown artifact"}</strong>
+                              <p>{check.message ?? "No check detail recorded."}</p>
+                              <code>
+                                expected {shortHash(check.expectedSha256)} / actual{" "}
+                                {shortHash(check.actualSha256)}
+                              </code>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {cliPacketReview.integrity.limitation && (
+                        <p className="muted">{cliPacketReview.integrity.limitation}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {cliPacketReview.audit && (
+                    <div className="audit-detail-panel">
+                      <div className="panel-header">
+                        <h3>Audit Details</h3>
+                        <strong>{auditArtifact?.name ?? "audit.json"}</strong>
+                      </div>
+                      <AuditRecordList
+                        title="Events"
+                        records={cliPacketReview.audit.events}
+                        fields={[
+                          { key: "timestamp", label: "Time" },
+                          { key: "type", label: "Type" },
+                          { key: "visibility", label: "Visibility" },
+                          { key: "details", label: "Details" },
+                        ]}
+                      />
+                      <AuditRecordList
+                        title="Tool Calls"
+                        records={cliPacketReview.audit.toolCalls}
+                        fields={[
+                          { key: "kind", label: "Kind" },
+                          { key: "command", label: "Command" },
+                          { key: "workingDirectory", label: "Working directory" },
+                          { key: "exitCode", label: "Exit" },
+                        ]}
+                      />
+                      <AuditRecordList
+                        title="Runtime Events"
+                        records={cliPacketReview.audit.runtimeEvents}
+                        fields={[
+                          { key: "timestamp", label: "Time" },
+                          { key: "type", label: "Type" },
+                          { key: "exitCode", label: "Exit" },
+                          { key: "stdoutSummary", label: "Stdout" },
+                          { key: "stderrSummary", label: "Stderr" },
+                        ]}
+                      />
+                      <AuditRecordList
+                        title="Credential Grants"
+                        records={cliPacketReview.audit.credentialGrants}
+                        fields={[
+                          { key: "purpose", label: "Purpose" },
+                          { key: "provider", label: "Provider" },
+                          { key: "scope", label: "Scope" },
+                          { key: "timestamp", label: "Time" },
+                        ]}
+                      />
+                    </div>
+                  )}
+
                   <div className="evidence-actions">
-                    {[policyArtifact, traceArtifact, ledgerArtifact, auditArtifact]
+                    {[
+                      policyArtifact,
+                      traceArtifact,
+                      ledgerArtifact,
+                      auditArtifact,
+                      integrityArtifact,
+                    ]
                       .filter(Boolean)
                       .map((artifact) => (
                         <button
@@ -1237,7 +1477,7 @@ export default function App() {
               <h2>Ready</h2>
               <p>
                 Create the core research task, import a local script trace, or
-                review a CLI packet.
+                review a CLI packet directory.
               </p>
             </div>
           )}

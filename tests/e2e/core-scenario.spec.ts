@@ -1,4 +1,28 @@
 import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+function sha256Hex(content: string) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function manifestArtifact(
+  name: string,
+  type: "markdown" | "json",
+  content: string,
+  createdAt: string,
+) {
+  return {
+    name,
+    type,
+    virtualPath: `artifacts/cli_fixture_review/${name}`,
+    createdAt,
+    bytes: Buffer.byteLength(content, "utf8"),
+    sha256: sha256Hex(content),
+  };
+}
 
 test("runs the v0.1 mock research task lifecycle", async ({ page }) => {
   await page.goto("/");
@@ -177,6 +201,15 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
           summary: "Started Wutai CLI wrapper session.",
           visibility: "user",
         },
+        {
+          eventId: `${taskId}_event_2`,
+          taskId,
+          timestamp: generatedAt,
+          type: "PermissionResolved",
+          summary: "Policy preflight denied this invocation before execution.",
+          details: policy.summary,
+          visibility: "user",
+        },
       ],
       permissions: [],
       sources: [],
@@ -203,6 +236,11 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
 - Highest severity: high
 - Matched rules: shell_interpreter_command_string
 `;
+  const reportContent = report;
+  const policyContent = JSON.stringify(policy, null, 2);
+  const traceContent = JSON.stringify(trace, null, 2);
+  const ledgerContent = JSON.stringify(ledger, null, 2);
+  const auditContent = JSON.stringify(audit, null, 2);
   const manifest = {
     schemaVersion: 2,
     kind: "wutai.work_packet_manifest",
@@ -241,11 +279,11 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
       policyDecision: "deny",
     },
     artifacts: [
-      { name: "report.md", type: "markdown", virtualPath: "artifacts/cli_fixture_review/report.md", createdAt: generatedAt },
-      { name: "policy.json", type: "json", virtualPath: "artifacts/cli_fixture_review/policy.json", createdAt: generatedAt },
-      { name: "trace.json", type: "json", virtualPath: "artifacts/cli_fixture_review/trace.json", createdAt: generatedAt },
-      { name: "ledger.json", type: "json", virtualPath: "artifacts/cli_fixture_review/ledger.json", createdAt: generatedAt },
-      { name: "audit.json", type: "json", virtualPath: "artifacts/cli_fixture_review/audit.json", createdAt: generatedAt },
+      manifestArtifact("report.md", "markdown", reportContent, generatedAt),
+      manifestArtifact("policy.json", "json", policyContent, generatedAt),
+      manifestArtifact("trace.json", "json", traceContent, generatedAt),
+      manifestArtifact("ledger.json", "json", ledgerContent, generatedAt),
+      manifestArtifact("audit.json", "json", auditContent, generatedAt),
     ],
     evidence: { status: "not_available", readyForTrust: false },
     coverage: { captured: [], blindSpots: [], enforcement: [] },
@@ -261,27 +299,27 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     {
       name: "report.md",
       mimeType: "text/markdown",
-      buffer: Buffer.from(report),
+      buffer: Buffer.from(reportContent),
     },
     {
       name: "policy.json",
       mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(policy, null, 2)),
+      buffer: Buffer.from(policyContent),
     },
     {
       name: "trace.json",
       mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(trace, null, 2)),
+      buffer: Buffer.from(traceContent),
     },
     {
       name: "ledger.json",
       mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(ledger, null, 2)),
+      buffer: Buffer.from(ledgerContent),
     },
     {
       name: "audit.json",
       mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(audit, null, 2)),
+      buffer: Buffer.from(auditContent),
     },
   ]);
 
@@ -293,6 +331,13 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   await expect(cliReview.getByText('sh -c "echo should_not_run"')).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download policy.json" }),
+  ).toBeVisible();
+  await expect(cliReview.getByText("Manifest Integrity")).toBeVisible();
+  await expect(cliReview.getByText("Verified 5 artifact hashes from the manifest.")).toBeVisible();
+  await expect(cliReview.getByText("Audit Details")).toBeVisible();
+  await expect(cliReview.getByText("Policy preflight denied this invocation before execution.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download integrity.json" }),
   ).toBeVisible();
 
   const importedTask = await page.evaluate(() => {
@@ -308,5 +353,214 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     "ledger.json",
     "audit.json",
     "manifest.json",
+    "integrity.json",
   ]);
+  const integrityArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "integrity.json",
+  );
+  expect(JSON.parse(integrityArtifact.content).status).toBe("passed");
+});
+
+test("imports a CLI wrapper packet directory and flags manifest hash mismatches", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const generatedAt = "2026-06-27T09:00:00.000Z";
+  const taskId = "cli_directory_mismatch";
+  const policy = {
+    schemaVersion: 1,
+    kind: "wutai.cli_policy_preflight",
+    taskId,
+    generatedAt,
+    decision: "allow",
+    highestSeverity: "low",
+    allowHighRisk: false,
+    command: "echo directory_import",
+    argv: ["echo", "directory_import"],
+    workingDirectory: "/tmp/wutai",
+    matchedRules: [],
+    summary: "Policy preflight allowed execution with no matched risk rules.",
+  };
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.local_script_trace",
+    taskId,
+    generatedAt,
+    captureMode: "cli_wrapper",
+    command: policy.command,
+    argv: policy.argv,
+    workingDirectory: policy.workingDirectory,
+    executed: true,
+    startedAt: generatedAt,
+    completedAt: generatedAt,
+    exitCode: 0,
+    stdoutSummary: "directory_import",
+    stderrSummary: "No output captured.",
+    touchedFiles: [],
+    producedArtifacts: [],
+  };
+  const ledger = {
+    schemaVersion: 1,
+    kind: "wutai.session_ledger",
+    generatedAt,
+    task: {
+      taskId,
+      title: "CLI run: echo directory_import",
+      userRequest: "Run and record local command: echo directory_import",
+      status: "completed",
+      plan: ["Run policy preflight.", "Review imported packet."],
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+      events: [
+        {
+          eventId: `${taskId}_event_1`,
+          taskId,
+          timestamp: generatedAt,
+          type: "ToolCallCaptured",
+          summary: "Started command: echo directory_import",
+          details: "Working directory: /tmp/wutai",
+          visibility: "expert",
+        },
+      ],
+      permissions: [],
+      sources: [],
+      artifacts: [],
+    },
+  };
+  const audit = {
+    schemaVersion: 1,
+    kind: "wutai.session_audit",
+    taskId,
+    generatedAt,
+    permissions: [],
+    policy,
+    events: ledger.task.events,
+    toolCalls: [
+      {
+        toolCallId: `${taskId}_tool_1`,
+        kind: "local_command",
+        command: policy.command,
+        argv: policy.argv,
+        workingDirectory: policy.workingDirectory,
+        startedAt: generatedAt,
+        completedAt: generatedAt,
+        exitCode: 0,
+        captureMode: "cli_wrapper",
+      },
+    ],
+    runtimeEvents: [
+      {
+        runtimeEventId: `${taskId}_runtime_1`,
+        type: "process_exit",
+        timestamp: generatedAt,
+        exitCode: 0,
+        stdoutSummary: "directory_import",
+        stderrSummary: "No output captured.",
+      },
+    ],
+    credentialGrants: [],
+  };
+  const reportContent = "# Wutai CLI Run Packet\n\nDirectory import fixture.\n";
+  const policyContent = JSON.stringify(policy, null, 2);
+  const traceContent = JSON.stringify(trace, null, 2);
+  const tamperedTraceContent = JSON.stringify(
+    { ...trace, stdoutSummary: "tampered after manifest" },
+    null,
+    2,
+  );
+  const ledgerContent = JSON.stringify(ledger, null, 2);
+  const auditContent = JSON.stringify(audit, null, 2);
+  const manifest = {
+    schemaVersion: 2,
+    kind: "wutai.work_packet_manifest",
+    packetId: `${taskId}_work_packet`,
+    packetType: "local_script",
+    taskId,
+    sessionId: taskId,
+    session: {
+      sessionId: taskId,
+      subject: ledger.task.title,
+      command: policy.command,
+      workingDirectory: policy.workingDirectory,
+      startedAt: generatedAt,
+      completedAt: generatedAt,
+      exitCode: 0,
+      importedTrace: false,
+    },
+    title: ledger.task.title,
+    status: "completed",
+    userRequest: ledger.task.userRequest,
+    generatedAt,
+    producer: {
+      name: "wutai",
+      adapter: "wutaiRunCli",
+      runtime: "node child_process spawn",
+    },
+    permissions: [],
+    audit: {
+      eventCount: 3,
+      eventTypeCounts: { ToolCallCaptured: 1, RuntimeEventCaptured: 1 },
+      permissionDecisionCount: 0,
+      toolCallCount: 1,
+      runtimeEventCount: 1,
+      credentialPurposes: [],
+      auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
+      policyDecision: "allow",
+    },
+    artifacts: [
+      manifestArtifact("report.md", "markdown", reportContent, generatedAt),
+      manifestArtifact("policy.json", "json", policyContent, generatedAt),
+      manifestArtifact("trace.json", "json", traceContent, generatedAt),
+      manifestArtifact("ledger.json", "json", ledgerContent, generatedAt),
+      manifestArtifact("audit.json", "json", auditContent, generatedAt),
+    ],
+    evidence: { status: "not_available", readyForTrust: false },
+    coverage: { captured: [], blindSpots: [], enforcement: [] },
+    humanReview: { attestation: "not_recorded" },
+  };
+
+  const packetDir = await mkdtemp(join(tmpdir(), "wutai-cli-packet-"));
+  try {
+    await writeFile(join(packetDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+    await writeFile(join(packetDir, "report.md"), reportContent);
+    await writeFile(join(packetDir, "policy.json"), policyContent);
+    await writeFile(join(packetDir, "trace.json"), tamperedTraceContent);
+    await writeFile(join(packetDir, "ledger.json"), ledgerContent);
+    await writeFile(join(packetDir, "audit.json"), auditContent);
+
+    await expect(page.getByLabel("CLI packet directory")).toHaveAttribute(
+      "webkitdirectory",
+      "",
+    );
+    await page.getByLabel("CLI packet directory").setInputFiles(packetDir);
+
+    const cliReview = page.getByLabel("CLI Packet Review");
+    await expect(cliReview).toBeVisible();
+    await expect(cliReview.getByText("Manifest Integrity")).toBeVisible();
+    await expect(
+      cliReview.getByText("Selected artifact does not match the manifest SHA-256."),
+    ).toBeVisible();
+    await expect(cliReview.getByText("Tool Calls", { exact: true })).toBeVisible();
+    await expect(cliReview.getByText("Runtime Events", { exact: true })).toBeVisible();
+    await expect(
+      cliReview.getByText("Started command: echo directory_import", { exact: true }),
+    ).toBeVisible();
+
+    const integrity = await page.evaluate(() => {
+      const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+      const artifact = tasks[0].artifacts.find(
+        (item: { name: string }) => item.name === "integrity.json",
+      );
+      return JSON.parse(artifact.content);
+    });
+    expect(integrity.status).toBe("failed");
+    expect(integrity.metrics.mismatched).toBe(1);
+    expect(
+      integrity.checks.find((check: { name: string }) => check.name === "trace.json")
+        .status,
+    ).toBe("mismatch");
+  } finally {
+    await rm(packetDir, { recursive: true, force: true });
+  }
 });

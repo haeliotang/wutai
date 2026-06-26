@@ -72,9 +72,10 @@ Implemented:
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs rule-based policy preflight, records exit code and git-status delta, and
   writes a local work packet.
-- Desktop review import for CLI wrapper packets. Select the packet's
-  `manifest.json` plus sibling artifacts to add the run to local task history
-  and inspect policy, trace, ledger, and audit artifacts.
+- Desktop review import for CLI wrapper packets. Select the packet directory,
+  or select `manifest.json` plus sibling artifacts, to add the run to local task
+  history, verify manifest artifact hashes, and inspect policy, trace, ledger,
+  audit, and integrity artifacts.
 
 Each completed research task writes a local work packet:
 
@@ -105,6 +106,12 @@ policy.json
 trace.json
 ledger.json
 audit.json
+```
+
+Each imported CLI wrapper packet also gets a local review artifact:
+
+```text
+integrity.json
 ```
 
 Not implemented:
@@ -198,11 +205,13 @@ network or filesystem access, or enforce a complete destructive-command policy.
 The policy rule set is intentionally small. It is a verified local execution
 ledger, not a full permission broker.
 
-To review a generated packet in the app, open the web preview or Tauri shell,
-choose `Import CLI packet`, and select `manifest.json`, `report.md`,
-`policy.json`, `trace.json`, `ledger.json`, and `audit.json` from the packet
-directory. The import is review-only; the desktop UI does not re-run the
-command.
+To review a generated packet in the app, open the web preview or Tauri shell and
+choose `Import CLI packet directory`. The file-based fallback is `Import CLI
+packet files`, then select `manifest.json`, `report.md`, `policy.json`,
+`trace.json`, `ledger.json`, and `audit.json` from the packet directory. The
+import recomputes selected artifact SHA-256 values against the manifest and
+writes `integrity.json` into local task history. It is review-only; the desktop
+UI does not re-run the command.
 
 ## Optional Real Research Adapter
 
@@ -305,8 +314,8 @@ Near-term engineering work:
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Extend CLI policy preflight beyond the current small high-risk rule set.
-- Extend desktop CLI packet review toward directory import and richer audit
-  browsing.
+- Extend desktop CLI packet review with stronger packet provenance checks and
+  richer audit filtering.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:
