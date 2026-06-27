@@ -93,6 +93,8 @@ and create a work packet. Its current boundary is structured but incomplete:
 - It runs a structured but incomplete policy preflight before execution.
 - It denies matched high-risk rules by default, unless the caller passes
   `--allow-high-risk`.
+- It loads profile behavior from `config/wutai-cli-policy-profiles.json`, or
+  from an explicit `--policy-config <path>`.
 - It supports `standard` and `strict` policy profiles; strict escalates warning
   rules to deny.
 - It supports `--dry-run`, which writes a review packet without spawning the
@@ -105,6 +107,10 @@ and create a work packet. Its current boundary is structured but incomplete:
 - It records argv, working directory, policy decision, exit code, bounded
   stdout/stderr summaries, git-status delta, session ledger, audit trail, and
   artifact hashes.
+- The desktop/web import path writes `provenance.json` for manifest hash,
+  producer fields, required artifact presence, schema-kind consistency, and
+  signature/attestation presence. Missing signatures remain a warning, not a
+  trusted-origin claim.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
 - It does not identify every destructive command.

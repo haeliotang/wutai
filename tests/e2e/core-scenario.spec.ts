@@ -334,10 +334,21 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   ).toBeVisible();
   await expect(cliReview.getByText("Manifest Integrity")).toBeVisible();
   await expect(cliReview.getByText("Verified 5 artifact hashes from the manifest.")).toBeVisible();
+  await expect(
+    cliReview.getByRole("heading", { name: "Packet Provenance" }),
+  ).toBeVisible();
+  await expect(
+    cliReview.getByText(
+      "Packet provenance recorded with 1 warning; the packet is not signed or trusted.",
+    ),
+  ).toBeVisible();
   await expect(cliReview.getByText("Audit Details")).toBeVisible();
   await expect(cliReview.getByText("Policy preflight denied this invocation before execution.")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download integrity.json" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download provenance.json" }),
   ).toBeVisible();
 
   const importedTask = await page.evaluate(() => {
@@ -354,11 +365,22 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     "audit.json",
     "manifest.json",
     "integrity.json",
+    "provenance.json",
   ]);
   const integrityArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "integrity.json",
   );
   expect(JSON.parse(integrityArtifact.content).status).toBe("passed");
+  const provenanceArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const provenance = JSON.parse(provenanceArtifact.content);
+  expect(provenance.status).toBe("warning");
+  expect(provenance.manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(
+    provenance.checks.find((check: { name: string }) => check.name === "trusted_signature")
+      .status,
+  ).toBe("warning");
 });
 
 test("records a dry-run packet review without desktop execution", async ({
@@ -907,11 +929,41 @@ test("imports a CLI wrapper packet directory and flags manifest hash mismatches"
     await expect(
       cliReview.getByText("Selected artifact does not match the manifest SHA-256."),
     ).toBeVisible();
-    await expect(cliReview.getByText("Tool Calls", { exact: true })).toBeVisible();
-    await expect(cliReview.getByText("Runtime Events", { exact: true })).toBeVisible();
+    await expect(
+      cliReview.locator(".audit-detail-group").filter({ hasText: "Tool Calls" }),
+    ).toBeVisible();
+    await expect(
+      cliReview.locator(".audit-detail-group").filter({ hasText: "Runtime Events" }),
+    ).toBeVisible();
     await expect(
       cliReview.getByText("Started command: echo directory_import", { exact: true }),
     ).toBeVisible();
+    await expect(
+      cliReview.getByRole("heading", { name: "Packet Provenance" }),
+    ).toBeVisible();
+    await expect(cliReview.getByText("Showing 3 of 3 audit records.")).toBeVisible();
+
+    const auditFilter = cliReview.getByLabel("Audit filter");
+    await auditFilter.getByRole("button", { name: "Tool Calls" }).click();
+    await expect(cliReview.getByText("Showing 1 of 3 audit records.")).toBeVisible();
+    const toolCallGroup = cliReview
+      .locator(".audit-detail-group")
+      .filter({ hasText: "Tool Calls" });
+    await expect(
+      toolCallGroup.getByText("echo directory_import", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      cliReview.locator(".audit-detail-group").filter({ hasText: "Runtime Events" }),
+    ).toHaveCount(0);
+
+    await auditFilter.getByRole("button", { name: "Runtime Events" }).click();
+    await expect(cliReview.getByText("Showing 1 of 3 audit records.")).toBeVisible();
+    await expect(
+      cliReview.getByText("process_exit", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      cliReview.locator(".audit-detail-group").filter({ hasText: "Tool Calls" }),
+    ).toHaveCount(0);
 
     const integrity = await page.evaluate(() => {
       const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
@@ -926,6 +978,15 @@ test("imports a CLI wrapper packet directory and flags manifest hash mismatches"
       integrity.checks.find((check: { name: string }) => check.name === "trace.json")
         .status,
     ).toBe("mismatch");
+    const provenance = await page.evaluate(() => {
+      const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+      const artifact = tasks[0].artifacts.find(
+        (item: { name: string }) => item.name === "provenance.json",
+      );
+      return JSON.parse(artifact.content);
+    });
+    expect(provenance.status).toBe("warning");
+    expect(provenance.metrics.warnings).toBe(1);
   } finally {
     await rm(packetDir, { recursive: true, force: true });
   }

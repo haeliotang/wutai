@@ -91,6 +91,31 @@ interface CliIntegrityArtifact {
   limitation?: string;
 }
 
+interface CliProvenanceArtifact {
+  status?: "passed" | "warning" | "failed";
+  summary?: string;
+  manifest?: {
+    sha256?: string;
+    bytes?: number;
+    packetId?: string;
+    producerAdapter?: string;
+    producerRuntime?: string;
+  };
+  metrics?: {
+    total?: number;
+    passed?: number;
+    warnings?: number;
+    failed?: number;
+  };
+  checks?: Array<{
+    name?: string;
+    status?: "passed" | "warning" | "failed";
+    message?: string;
+    evidence?: string;
+  }>;
+  limitation?: string;
+}
+
 interface CliAuditArtifact {
   permissions?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
@@ -98,6 +123,28 @@ interface CliAuditArtifact {
   runtimeEvents?: Array<Record<string, unknown>>;
   credentialGrants?: Array<Record<string, unknown>>;
 }
+
+type AuditFilter =
+  | "all"
+  | "events"
+  | "toolCalls"
+  | "runtimeEvents"
+  | "credentialGrants";
+
+interface AuditRecordGroup {
+  id: Exclude<AuditFilter, "all">;
+  title: string;
+  records?: Array<Record<string, unknown>>;
+  fields: Array<{ key: string; label: string }>;
+}
+
+const AUDIT_FILTERS: Array<{ id: AuditFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "events", label: "Events" },
+  { id: "toolCalls", label: "Tool Calls" },
+  { id: "runtimeEvents", label: "Runtime Events" },
+  { id: "credentialGrants", label: "Credential Grants" },
+];
 
 interface CliReviewArtifact {
   schemaVersion?: number;
@@ -164,6 +211,62 @@ interface AuditRecordListProps {
   title: string;
   records?: Array<Record<string, unknown>>;
   fields: Array<{ key: string; label: string }>;
+}
+
+function auditRecordGroups(audit: CliAuditArtifact | null): AuditRecordGroup[] {
+  if (!audit) return [];
+
+  return [
+    {
+      id: "events",
+      title: "Events",
+      records: audit.events,
+      fields: [
+        { key: "timestamp", label: "Time" },
+        { key: "type", label: "Type" },
+        { key: "visibility", label: "Visibility" },
+        { key: "details", label: "Details" },
+      ],
+    },
+    {
+      id: "toolCalls",
+      title: "Tool Calls",
+      records: audit.toolCalls,
+      fields: [
+        { key: "kind", label: "Kind" },
+        { key: "command", label: "Command" },
+        { key: "workingDirectory", label: "Working directory" },
+        { key: "exitCode", label: "Exit" },
+      ],
+    },
+    {
+      id: "runtimeEvents",
+      title: "Runtime Events",
+      records: audit.runtimeEvents,
+      fields: [
+        { key: "timestamp", label: "Time" },
+        { key: "type", label: "Type" },
+        { key: "exitCode", label: "Exit" },
+        { key: "stdoutSummary", label: "Stdout" },
+        { key: "stderrSummary", label: "Stderr" },
+      ],
+    },
+    {
+      id: "credentialGrants",
+      title: "Credential Grants",
+      records: audit.credentialGrants,
+      fields: [
+        { key: "purpose", label: "Purpose" },
+        { key: "provider", label: "Provider" },
+        { key: "scope", label: "Scope" },
+        { key: "timestamp", label: "Time" },
+      ],
+    },
+  ];
+}
+
+function auditRecordCount(groups: AuditRecordGroup[]) {
+  return groups.reduce((count, group) => count + (group.records?.length ?? 0), 0);
 }
 
 function AuditRecordList({ title, records, fields }: AuditRecordListProps) {
@@ -238,6 +341,7 @@ export default function App() {
     null,
   );
   const [providerSetupSaving, setProviderSetupSaving] = useState(false);
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
   const abortRef = useRef<AbortController | null>(null);
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
   const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
@@ -283,6 +387,10 @@ export default function App() {
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
   }, []);
+
+  useEffect(() => {
+    setAuditFilter("all");
+  }, [activeTask?.taskId]);
 
   async function runPreflight(adapter: ResearchAdapter): Promise<ResearchPreflight> {
     try {
@@ -498,6 +606,13 @@ export default function App() {
     [activeTask],
   );
 
+  const provenanceArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "provenance.json") ??
+      null,
+    [activeTask],
+  );
+
   const reviewArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "review.json") ??
@@ -540,6 +655,9 @@ export default function App() {
       integrity: integrityArtifact
         ? parseJsonArtifact<CliIntegrityArtifact>(integrityArtifact.content)
         : null,
+      provenance: provenanceArtifact
+        ? parseJsonArtifact<CliProvenanceArtifact>(provenanceArtifact.content)
+        : null,
       review: reviewArtifact
         ? parseJsonArtifact<CliReviewArtifact>(reviewArtifact.content)
         : null,
@@ -549,6 +667,7 @@ export default function App() {
     integrityArtifact,
     manifestArtifact,
     policyArtifact,
+    provenanceArtifact,
     reviewArtifact,
     traceArtifact,
   ]);
@@ -576,6 +695,26 @@ export default function App() {
       review: cliPacketReview.review,
     };
   }, [activeTask, cliPacketReview]);
+
+  const cliAuditGroups = useMemo(
+    () => auditRecordGroups(cliPacketReview?.audit ?? null),
+    [cliPacketReview],
+  );
+  const visibleCliAuditGroups = useMemo(
+    () =>
+      auditFilter === "all"
+        ? cliAuditGroups
+        : cliAuditGroups.filter((group) => group.id === auditFilter),
+    [auditFilter, cliAuditGroups],
+  );
+  const cliAuditTotalCount = useMemo(
+    () => auditRecordCount(cliAuditGroups),
+    [cliAuditGroups],
+  );
+  const cliAuditVisibleCount = useMemo(
+    () => auditRecordCount(visibleCliAuditGroups),
+    [visibleCliAuditGroups],
+  );
 
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
@@ -1587,53 +1726,95 @@ export default function App() {
                     </div>
                   )}
 
+                  {cliPacketReview.provenance && (
+                    <div
+                      className={`provenance-panel provenance-${cliPacketReview.provenance.status ?? "warning"}`}
+                    >
+                      <div className="panel-header">
+                        <h3>Packet Provenance</h3>
+                        <strong>{cliPacketReview.provenance.status ?? "warning"}</strong>
+                      </div>
+                      <p>
+                        {cliPacketReview.provenance.summary ??
+                          "Packet provenance check unavailable."}
+                      </p>
+                      <div className="provenance-metrics">
+                        <span>
+                          Manifest{" "}
+                          <strong>
+                            {shortHash(cliPacketReview.provenance.manifest?.sha256)}
+                          </strong>
+                        </span>
+                        <span>
+                          Producer{" "}
+                          <strong>
+                            {cliPacketReview.provenance.manifest?.producerAdapter ??
+                              "unknown"}
+                          </strong>
+                        </span>
+                        <span>
+                          Warnings{" "}
+                          <strong>
+                            {cliPacketReview.provenance.metrics?.warnings ?? 0}
+                          </strong>
+                        </span>
+                        <span>
+                          Failed{" "}
+                          <strong>{cliPacketReview.provenance.metrics?.failed ?? 0}</strong>
+                        </span>
+                      </div>
+                      <div className="provenance-check-list">
+                        {cliPacketReview.provenance.checks?.map((check, index) => (
+                          <div key={`${check.name ?? "check"}_${index}`}>
+                            <span
+                              className={`provenance-status provenance-check-${check.status ?? "warning"}`}
+                            >
+                              {check.status ?? "warning"}
+                            </span>
+                            <div>
+                              <strong>{check.name ?? "unknown check"}</strong>
+                              <p>{check.message ?? "No provenance detail recorded."}</p>
+                              {check.evidence && <code>{check.evidence}</code>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {cliPacketReview.provenance.limitation && (
+                        <p className="muted">{cliPacketReview.provenance.limitation}</p>
+                      )}
+                    </div>
+                  )}
+
                   {cliPacketReview.audit && (
                     <div className="audit-detail-panel">
                       <div className="panel-header">
                         <h3>Audit Details</h3>
                         <strong>{auditArtifact?.name ?? "audit.json"}</strong>
                       </div>
-                      <AuditRecordList
-                        title="Events"
-                        records={cliPacketReview.audit.events}
-                        fields={[
-                          { key: "timestamp", label: "Time" },
-                          { key: "type", label: "Type" },
-                          { key: "visibility", label: "Visibility" },
-                          { key: "details", label: "Details" },
-                        ]}
-                      />
-                      <AuditRecordList
-                        title="Tool Calls"
-                        records={cliPacketReview.audit.toolCalls}
-                        fields={[
-                          { key: "kind", label: "Kind" },
-                          { key: "command", label: "Command" },
-                          { key: "workingDirectory", label: "Working directory" },
-                          { key: "exitCode", label: "Exit" },
-                        ]}
-                      />
-                      <AuditRecordList
-                        title="Runtime Events"
-                        records={cliPacketReview.audit.runtimeEvents}
-                        fields={[
-                          { key: "timestamp", label: "Time" },
-                          { key: "type", label: "Type" },
-                          { key: "exitCode", label: "Exit" },
-                          { key: "stdoutSummary", label: "Stdout" },
-                          { key: "stderrSummary", label: "Stderr" },
-                        ]}
-                      />
-                      <AuditRecordList
-                        title="Credential Grants"
-                        records={cliPacketReview.audit.credentialGrants}
-                        fields={[
-                          { key: "purpose", label: "Purpose" },
-                          { key: "provider", label: "Provider" },
-                          { key: "scope", label: "Scope" },
-                          { key: "timestamp", label: "Time" },
-                        ]}
-                      />
+                      <div className="audit-filter-bar" aria-label="Audit filter">
+                        {AUDIT_FILTERS.map((filter) => (
+                          <button
+                            key={filter.id}
+                            type="button"
+                            aria-pressed={auditFilter === filter.id}
+                            onClick={() => setAuditFilter(filter.id)}
+                          >
+                            {filter.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="audit-filter-summary">
+                        Showing {cliAuditVisibleCount} of {cliAuditTotalCount} audit
+                        records.
+                      </p>
+                      {visibleCliAuditGroups.map((group) => (
+                        <AuditRecordList
+                          key={group.id}
+                          title={group.title}
+                          records={group.records}
+                          fields={group.fields}
+                        />
+                      ))}
                     </div>
                   )}
 
@@ -1644,6 +1825,7 @@ export default function App() {
                       ledgerArtifact,
                       auditArtifact,
                       integrityArtifact,
+                      provenanceArtifact,
                       reviewArtifact,
                     ]
                       .filter(Boolean)

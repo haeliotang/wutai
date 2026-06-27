@@ -11,6 +11,18 @@ type CliPacketFile = Pick<File, "name" | "text"> & {
 };
 
 const INTEGRITY_ARTIFACT_NAME = "integrity.json";
+const PROVENANCE_ARTIFACT_NAME = "provenance.json";
+const INTERNAL_IMPORT_ARTIFACT_NAMES = new Set([
+  INTEGRITY_ARTIFACT_NAME,
+  PROVENANCE_ARTIFACT_NAME,
+]);
+const REQUIRED_CLI_PACKET_ARTIFACTS = [
+  "report.md",
+  "policy.json",
+  "trace.json",
+  "ledger.json",
+  "audit.json",
+];
 
 interface ManifestArtifact {
   name: string;
@@ -23,15 +35,20 @@ interface ManifestArtifact {
 }
 
 interface WorkPacketManifest {
+  schemaVersion?: number;
   kind?: string;
+  packetId?: string;
   packetType?: string;
   taskId?: string;
+  sessionId?: string;
   title?: string;
   status?: string;
   userRequest?: string;
   generatedAt?: string;
   producer?: {
+    name?: string;
     adapter?: string;
+    runtime?: string;
   };
   permissions?: PermissionRequest[];
   artifacts?: ManifestArtifact[];
@@ -77,6 +94,45 @@ interface PacketIntegrityArtifact {
   limitation: string;
 }
 
+interface ProvenanceCheck {
+  name: string;
+  status: "passed" | "warning" | "failed";
+  message: string;
+  evidence?: string;
+}
+
+interface PacketProvenanceArtifact {
+  schemaVersion: 1;
+  kind: "wutai.packet_provenance_check";
+  taskId: string;
+  generatedAt: string;
+  importMode: "directory" | "files";
+  status: "passed" | "warning" | "failed";
+  summary: string;
+  manifest: {
+    sha256: string;
+    bytes: number;
+    kind?: string;
+    schemaVersion?: number;
+    packetId?: string;
+    packetType?: string;
+    taskId?: string;
+    sessionId?: string;
+    generatedAt?: string;
+    producerName?: string;
+    producerAdapter?: string;
+    producerRuntime?: string;
+  };
+  metrics: {
+    total: number;
+    passed: number;
+    warnings: number;
+    failed: number;
+  };
+  checks: ProvenanceCheck[];
+  limitation: string;
+}
+
 function parseJson<T>(content: string, name: string): T {
   try {
     return JSON.parse(content) as T;
@@ -112,6 +168,17 @@ async function sha256Hex(content: string) {
 
 function byteLength(content: string) {
   return new TextEncoder().encode(content).byteLength;
+}
+
+function safeJson(content: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 async function buildIntegrityArtifact(
@@ -202,6 +269,147 @@ async function buildIntegrityArtifact(
   };
 }
 
+async function buildProvenanceArtifact(
+  taskId: string,
+  generatedAt: string,
+  manifest: WorkPacketManifest,
+  manifestContent: string,
+  contentByName: Map<string, string>,
+  importMode: "directory" | "files",
+): Promise<PacketProvenanceArtifact> {
+  const checks: ProvenanceCheck[] = [
+    {
+      name: "manifest.json",
+      status: "passed",
+      message: "Selected manifest parsed as a Wutai CLI wrapper packet.",
+      evidence: `kind=${manifest.kind ?? "unknown"} packetType=${manifest.packetType ?? "unknown"} producer=${manifest.producer?.adapter ?? "unknown"}`,
+    },
+    {
+      name: "manifest_sha256",
+      status: "passed",
+      message: "Recorded the selected manifest byte hash for local provenance.",
+      evidence: await sha256Hex(manifestContent),
+    },
+  ];
+
+  const missingRequired = REQUIRED_CLI_PACKET_ARTIFACTS.filter(
+    (name) => !contentByName.has(name),
+  );
+  checks.push({
+    name: "required_artifacts",
+    status: missingRequired.length ? "failed" : "passed",
+    message: missingRequired.length
+      ? `Missing required CLI packet artifacts: ${missingRequired.join(", ")}.`
+      : "All required CLI packet artifacts were selected.",
+  });
+
+  const manifestArtifactNames = new Set(
+    manifest.artifacts?.map((artifact) => artifact.name) ?? [],
+  );
+  const missingFromManifest = REQUIRED_CLI_PACKET_ARTIFACTS.filter(
+    (name) => !manifestArtifactNames.has(name),
+  );
+  checks.push({
+    name: "manifest_inventory",
+    status: missingFromManifest.length ? "warning" : "passed",
+    message: missingFromManifest.length
+      ? `Manifest artifact inventory omits: ${missingFromManifest.join(", ")}.`
+      : "Manifest artifact inventory includes the required CLI packet artifacts.",
+    evidence: `${manifestArtifactNames.size} manifest artifact entries`,
+  });
+
+  const expectedKinds: Array<[string, string]> = [
+    ["policy.json", "wutai.cli_policy_preflight"],
+    ["trace.json", "wutai.local_script_trace"],
+    ["ledger.json", "wutai.session_ledger"],
+    ["audit.json", "wutai.session_audit"],
+  ];
+  for (const [name, expectedKind] of expectedKinds) {
+    const content = contentByName.get(name);
+    if (!content) {
+      checks.push({
+        name,
+        status: "failed",
+        message: `${name} was not selected, so its schema kind could not be checked.`,
+      });
+      continue;
+    }
+    const parsed = safeJson(content);
+    const actualKind = parsed?.kind;
+    const artifactTaskId =
+      name === "ledger.json"
+        ? (parsed?.task as { taskId?: unknown } | undefined)?.taskId
+        : parsed?.taskId;
+    checks.push({
+      name,
+      status:
+        actualKind === expectedKind && (!artifactTaskId || artifactTaskId === taskId)
+          ? "passed"
+          : "failed",
+      message:
+        actualKind === expectedKind
+          ? "Artifact schema kind matches the expected Wutai CLI packet contract."
+          : `Artifact schema kind mismatch: expected ${expectedKind}, got ${String(actualKind ?? "missing")}.`,
+      evidence: `kind=${String(actualKind ?? "missing")} taskId=${String(artifactTaskId ?? "missing")}`,
+    });
+  }
+
+  const signed =
+    "signature" in manifest ||
+    "signatures" in manifest ||
+    "attestation" in manifest ||
+    "attestations" in manifest;
+  checks.push({
+    name: "trusted_signature",
+    status: signed ? "passed" : "warning",
+    message: signed
+      ? "Manifest contains a signature or attestation field."
+      : "No manifest signature or trusted producer attestation was selected.",
+  });
+
+  const metrics = {
+    total: checks.length,
+    passed: checks.filter((check) => check.status === "passed").length,
+    warnings: checks.filter((check) => check.status === "warning").length,
+    failed: checks.filter((check) => check.status === "failed").length,
+  };
+  const status =
+    metrics.failed > 0 ? "failed" : metrics.warnings > 0 ? "warning" : "passed";
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.packet_provenance_check",
+    taskId,
+    generatedAt,
+    importMode,
+    status,
+    summary:
+      status === "failed"
+        ? `Packet provenance check found ${metrics.failed} failed check and ${metrics.warnings} warning.`
+        : status === "warning"
+          ? `Packet provenance recorded with ${metrics.warnings} warning; the packet is not signed or trusted.`
+          : "Packet provenance checks passed for the selected CLI wrapper packet.",
+    manifest: {
+      sha256: await sha256Hex(manifestContent),
+      bytes: byteLength(manifestContent),
+      kind: manifest.kind,
+      schemaVersion: manifest.schemaVersion,
+      packetId: manifest.packetId,
+      packetType: manifest.packetType,
+      taskId: manifest.taskId,
+      sessionId: manifest.sessionId,
+      generatedAt: manifest.generatedAt,
+      producerName: manifest.producer?.name,
+      producerAdapter: manifest.producer?.adapter,
+      producerRuntime: manifest.producer?.runtime,
+    },
+    metrics,
+    checks,
+    limitation:
+      "This records selected packet provenance and schema consistency. It does not prove the manifest was signed, produced by a trusted runtime, or unmodified before selection.",
+  };
+}
+
 function event(
   taskId: string,
   index: number,
@@ -269,6 +477,14 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
     contentByName,
     importMode,
   );
+  const provenance = await buildProvenanceArtifact(
+    taskId,
+    new Date().toISOString(),
+    manifest,
+    manifestContent,
+    contentByName,
+    importMode,
+  );
   const orderedNames = [
     ...(manifest.artifacts?.map((artifact) => artifact.name) ?? []),
     "manifest.json",
@@ -278,7 +494,7 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
       ...orderedNames,
       ...Array.from(contentByName.keys()).sort((a, b) => a.localeCompare(b)),
     ]),
-  ].filter((name) => contentByName.has(name) && name !== INTEGRITY_ARTIFACT_NAME);
+  ].filter((name) => contentByName.has(name) && !INTERNAL_IMPORT_ARTIFACT_NAMES.has(name));
   const manifestArtifactsByName = new Map(
     manifest.artifacts?.map((artifact) => [artifact.name, artifact]) ?? [],
   );
@@ -305,6 +521,16 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
     createdAt: integrity.generatedAt,
   };
   const artifacts = [...importedArtifacts, integrityArtifact];
+  const provenanceArtifact: ArtifactRecord = {
+    artifactId: `${taskId}_artifact_provenance_json`,
+    taskId,
+    type: "json",
+    name: PROVENANCE_ARTIFACT_NAME,
+    virtualPath: `imported/${taskId}/${PROVENANCE_ARTIFACT_NAME}`,
+    content: JSON.stringify(provenance, null, 2),
+    createdAt: provenance.generatedAt,
+  };
+  const allArtifacts = [...artifacts, provenanceArtifact];
   const importedEvent = event(
     taskId,
     1,
@@ -316,8 +542,8 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
     taskId,
     2,
     generatedAt,
-    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes.`,
-    integrity.summary,
+    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes and provenance.`,
+    `${integrity.summary} ${provenance.summary}`,
   );
 
   return {
@@ -333,7 +559,7 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
         ? ledgerTask.plan
         : [
             "Import the CLI wrapper work packet.",
-            "Check selected artifacts against manifest hashes.",
+            "Check selected artifacts against manifest hashes and packet provenance.",
             "Review policy, trace, ledger, audit, manifest, and integrity artifacts.",
             "Keep this as a review-only desktop record.",
           ],
@@ -345,6 +571,6 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
         : [importedEvent, artifactEvent],
     permissions: manifest.permissions ?? ledgerTask?.permissions ?? [],
     sources: [],
-    artifacts,
+    artifacts: allArtifacts,
   };
 }

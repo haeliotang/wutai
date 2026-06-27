@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.cli_policy_profile_config",
+  "defaultProfile": "standard",
+  "profiles": {
+    "standard": {
+      "profileId": "standard",
+      "name": "Standard",
+      "description": "Deny high-risk rules and record medium-risk rules as warnings.",
+      "warningAction": "warn"
+    },
+    "strict": {
+      "profileId": "strict",
+      "name": "Strict",
+      "description": "Deny high-risk rules and escalate medium-risk warning rules to deny.",
+      "warningAction": "deny"
+    }
+  }
+}

@@ -536,6 +536,7 @@ select:focus {
 
 .dry-run-review-panel,
 .integrity-panel,
+.provenance-panel,
 .audit-detail-panel {
   display: grid;
   gap: 12px;
@@ -547,6 +548,7 @@ select:focus {
 
 .dry-run-review-panel .panel-header h3,
 .integrity-panel .panel-header h3,
+.provenance-panel .panel-header h3,
 .audit-detail-panel .panel-header h3 {
   color: #f4f1e8;
   font-size: 16px;
@@ -555,6 +557,7 @@ select:focus {
 
 .dry-run-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
+.provenance-panel .panel-header > strong,
 .audit-detail-panel .panel-header > strong {
   color: #d6e8c6;
   font-size: 12px;
@@ -563,7 +566,8 @@ select:focus {
 }
 
 .dry-run-review-panel > p,
-.integrity-panel > p {
+.integrity-panel > p,
+.provenance-panel > p {
   color: #d4d1c5;
   line-height: 1.5;
 }
@@ -619,6 +623,20 @@ select:focus {
   border-color: #6f5b22;
 }
 
+.provenance-passed {
+  border-color: #3c6a36;
+}
+
+.provenance-warning {
+  border-color: #6f5b22;
+  background: #100f09;
+}
+
+.provenance-failed {
+  border-color: #7a4a34;
+  background: #120d09;
+}
+
 .integrity-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -638,6 +656,28 @@ select:focus {
 .integrity-metrics strong {
   color: #f4f1e8;
   font-size: 17px;
+}
+
+.provenance-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provenance-metrics span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  padding: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
+.provenance-metrics strong {
+  color: #f4f1e8;
+  font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .integrity-check-list {
@@ -672,6 +712,38 @@ select:focus {
   overflow-wrap: anywhere;
 }
 
+.provenance-check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.provenance-check-list > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid #20241e;
+  padding-top: 8px;
+}
+
+.provenance-check-list strong {
+  color: #f4f1e8;
+  font-size: 13px;
+}
+
+.provenance-check-list p {
+  margin-top: 4px;
+  color: #b8b6aa;
+  line-height: 1.45;
+}
+
+.provenance-check-list code {
+  display: block;
+  margin-top: 4px;
+  color: #95e884;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .integrity-status {
   align-self: start;
   border: 1px solid #3f463d;
@@ -680,6 +752,31 @@ select:focus {
   text-align: center;
   font-size: 11px;
   text-transform: uppercase;
+}
+
+.provenance-status {
+  align-self: start;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.provenance-check-passed {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.provenance-check-warning {
+  border-color: #e7d37a;
+  color: #e7d37a;
+}
+
+.provenance-check-failed {
+  border-color: #ffb085;
+  color: #ffb085;
 }
 
 .integrity-check-passed {
@@ -702,6 +799,30 @@ select:focus {
   border: 1px solid #242820;
   border-radius: 6px;
   background: #050605;
+}
+
+.audit-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-filter-bar button {
+  min-height: 34px;
+  padding: 0 12px;
+  border-color: #354031;
+  color: #d4d1c5;
+}
+
+.audit-filter-bar button[aria-pressed="true"] {
+  border-color: #95e884;
+  color: #95e884;
+  background: #10180e;
+}
+
+.audit-filter-summary {
+  color: #b8b6aa;
+  font-size: 13px;
 }
 
 .audit-detail-group summary {
@@ -914,12 +1035,14 @@ select:focus {
   .evidence-metrics,
   .cli-review-grid,
   .dry-run-review-grid,
-  .integrity-metrics {
+  .integrity-metrics,
+  .provenance-metrics {
     grid-template-columns: 1fr;
   }
 
   .cli-rule-list > div,
   .integrity-check-list > div,
+  .provenance-check-list > div,
   .audit-record dl div {
     grid-template-columns: 1fr;
   }

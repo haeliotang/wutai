@@ -70,14 +70,15 @@ Implemented:
   reviewable work packet without executing the command.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
-  runs structured policy preflight, supports `standard` / `strict` profiles and
-  dry-run review, records exit code and git-status delta, and writes a local
-  work packet.
+  runs structured policy preflight from `config/wutai-cli-policy-profiles.json`,
+  supports `standard` / `strict` profiles and dry-run review, records exit code
+  and git-status delta, and writes a local work packet.
 - Desktop review import for CLI wrapper packets. Select the packet directory,
   or select `manifest.json` plus sibling artifacts, to add the run to local task
-  history, verify manifest artifact hashes, and inspect policy, trace, ledger,
-  audit, and integrity artifacts. Dry-run packets with pending execution can be
-  marked approved or denied as a local review record only.
+  history, verify manifest artifact hashes, record local provenance checks,
+  inspect policy, trace, ledger, filtered audit details, integrity, and
+  provenance artifacts. Dry-run packets with pending execution can be marked
+  approved or denied as a local review record only.
 
 Each completed research task writes a local work packet:
 
@@ -110,10 +111,11 @@ ledger.json
 audit.json
 ```
 
-Each imported CLI wrapper packet also gets a local integrity artifact:
+Each imported CLI wrapper packet also gets local review-side artifacts:
 
 ```text
 integrity.json
+provenance.json
 ```
 
 If a dry-run packet is approved or denied in the desktop/web review surface,
@@ -200,7 +202,9 @@ the explicit invocation, argv, working directory, policy preflight decision,
 exit code, bounded stdout/stderr summaries, a git-status delta, and artifact
 hashes.
 
-The wrapper uses a structured but incomplete policy catalog. High-risk patterns
+The wrapper uses a structured but incomplete policy catalog. Profile behavior is
+loaded from `config/wutai-cli-policy-profiles.json`, or from a caller-supplied
+`--policy-config <path>`. High-risk patterns
 such as shell interpreter command strings, recursive or forced remove,
 environment dumps, privilege escalation, destructive git operations, and
 recursive permission changes are denied before execution by default. Medium
@@ -230,7 +234,10 @@ choose `Import CLI packet directory`. The file-based fallback is `Import CLI
 packet files`, then select `manifest.json`, `report.md`, `policy.json`,
 `trace.json`, `ledger.json`, and `audit.json` from the packet directory. The
 import recomputes selected artifact SHA-256 values against the manifest and
-writes `integrity.json` into local task history. If the packet is a dry-run with
+writes `integrity.json` and `provenance.json` into local task history. The
+provenance check records manifest hash, producer fields, required artifact
+presence, schema-kind consistency, and whether a signature/attestation is
+present; it does not prove trusted origin. If the packet is a dry-run with
 pending local-script execution permission, the review panel can record approve or
 deny into `review.json`. It is review-only; the desktop UI does not run or re-run
 the command.
@@ -335,10 +342,9 @@ Near-term engineering work:
 - Continue generalizing the work-packet manifest beyond research, imported
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Externalize CLI policy profile configuration and connect dry-run review to a
-  desktop confirmation path.
-- Extend desktop CLI packet review with stronger packet provenance checks and
-  richer audit filtering.
+- Add signed packet provenance or trusted producer attestation for CLI packets.
+- Move beyond profile-level policy behavior toward externally configurable rule
+  overrides.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

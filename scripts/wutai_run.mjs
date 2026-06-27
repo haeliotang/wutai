@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const MAX_CAPTURE_CHARS = 16_000;
@@ -10,19 +11,28 @@ const MAX_SUMMARY_CHARS = 2_000;
 const POLICY_DENIED_EXIT_CODE = 3;
 const POLICY_VERSION = "wutai-cli-policy-v0.2";
 const DEFAULT_POLICY_PROFILE = "standard";
+const DEFAULT_POLICY_CONFIG_URL = new URL(
+  "../config/wutai-cli-policy-profiles.json",
+  import.meta.url,
+);
 
-const POLICY_PROFILES = {
-  standard: {
-    profileId: "standard",
-    name: "Standard",
-    description: "Deny high-risk rules and record medium-risk rules as warnings.",
-    warningAction: "warn",
-  },
-  strict: {
-    profileId: "strict",
-    name: "Strict",
-    description: "Deny high-risk rules and escalate medium-risk warning rules to deny.",
-    warningAction: "deny",
+const FALLBACK_POLICY_PROFILE_CONFIG = {
+  schemaVersion: 1,
+  kind: "wutai.cli_policy_profile_config",
+  defaultProfile: DEFAULT_POLICY_PROFILE,
+  profiles: {
+    standard: {
+      profileId: "standard",
+      name: "Standard",
+      description: "Deny high-risk rules and record medium-risk rules as warnings.",
+      warningAction: "warn",
+    },
+    strict: {
+      profileId: "strict",
+      name: "Strict",
+      description: "Deny high-risk rules and escalate medium-risk warning rules to deny.",
+      warningAction: "deny",
+    },
   },
 };
 
@@ -34,8 +44,10 @@ Options:
   --output-dir <path>   Directory for generated work packets. Default: artifacts/cli
   --cwd <path>          Working directory for the wrapped command. Default: current directory
   --title <text>        Packet title
+  --policy-config <path>
+                       JSON profile config. Default: config/wutai-cli-policy-profiles.json
   --policy-profile <id>
-                       Policy profile: standard or strict. Default: standard
+                       Policy profile id from the config. Default: config default
   --dry-run            Generate a review packet without executing the command
   --allow-high-risk     Execute even when policy preflight matches high-risk rules
   --override-reason <text>
@@ -57,7 +69,8 @@ function parseArgs(argv) {
     outputDir: "artifacts/cli",
     cwd: process.cwd(),
     title: null,
-    policyProfile: DEFAULT_POLICY_PROFILE,
+    policyConfig: null,
+    policyProfile: null,
     dryRun: false,
     allowHighRisk: false,
     overrideReason: null,
@@ -77,6 +90,10 @@ function parseArgs(argv) {
       index += 1;
       if (!optionArgs[index]) throw new Error("--policy-profile requires a value.");
       options.policyProfile = optionArgs[index];
+    } else if (arg === "--policy-config") {
+      index += 1;
+      if (!optionArgs[index]) throw new Error("--policy-config requires a value.");
+      options.policyConfig = optionArgs[index];
     } else if (arg === "--override-reason") {
       index += 1;
       if (!optionArgs[index]) throw new Error("--override-reason requires a value.");
@@ -101,6 +118,89 @@ function parseArgs(argv) {
   }
 
   return { options, command };
+}
+
+function normalizePolicyConfig(raw, sourcePath) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(`Policy config ${sourcePath} must be a JSON object.`);
+  }
+  if (raw.kind && raw.kind !== "wutai.cli_policy_profile_config") {
+    throw new Error(
+      `Policy config ${sourcePath} has unsupported kind: ${raw.kind}.`,
+    );
+  }
+  if (!raw.profiles || typeof raw.profiles !== "object" || Array.isArray(raw.profiles)) {
+    throw new Error(`Policy config ${sourcePath} must define a profiles object.`);
+  }
+
+  const profiles = {};
+  for (const [profileId, profile] of Object.entries(raw.profiles)) {
+    if (!profile || typeof profile !== "object") {
+      throw new Error(`Policy profile ${profileId} in ${sourcePath} must be an object.`);
+    }
+    if (!["warn", "deny"].includes(profile.warningAction)) {
+      throw new Error(
+        `Policy profile ${profileId} in ${sourcePath} must set warningAction to warn or deny.`,
+      );
+    }
+    profiles[profileId] = {
+      profileId: profile.profileId ?? profileId,
+      name: profile.name ?? profileId,
+      description: profile.description ?? "No profile description provided.",
+      warningAction: profile.warningAction,
+    };
+  }
+
+  const defaultProfile = raw.defaultProfile ?? DEFAULT_POLICY_PROFILE;
+  if (!profiles[defaultProfile]) {
+    throw new Error(
+      `Policy config ${sourcePath} defaultProfile ${defaultProfile} is not defined.`,
+    );
+  }
+
+  return {
+    schemaVersion: raw.schemaVersion ?? 1,
+    kind: "wutai.cli_policy_profile_config",
+    sourcePath,
+    defaultProfile,
+    profiles,
+  };
+}
+
+async function loadPolicyConfig(configPath) {
+  const sourcePath = configPath
+    ? resolve(configPath)
+    : fileURLToPath(DEFAULT_POLICY_CONFIG_URL);
+
+  let content;
+  try {
+    content = await readFile(sourcePath, "utf8");
+  } catch (error) {
+    const missingDefault =
+      !configPath &&
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT";
+    if (missingDefault) {
+      return normalizePolicyConfig(FALLBACK_POLICY_PROFILE_CONFIG, "built-in fallback");
+    }
+    throw new Error(
+      `Could not load policy config ${sourcePath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  try {
+    return normalizePolicyConfig(JSON.parse(content), sourcePath);
+  } catch (error) {
+    throw new Error(
+      `Could not parse policy config ${sourcePath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 function appendBounded(current, chunk) {
@@ -285,11 +385,11 @@ function unique(items) {
   return [...new Set(items)];
 }
 
-function policyProfile(profileId) {
-  const profile = POLICY_PROFILES[profileId];
+function policyProfile(profileId, policyConfig) {
+  const profile = policyConfig.profiles[profileId];
   if (!profile) {
     throw new Error(
-      `Unknown policy profile: ${profileId}. Expected one of ${Object.keys(POLICY_PROFILES).join(", ")}.`,
+      `Unknown policy profile: ${profileId}. Expected one of ${Object.keys(policyConfig.profiles).join(", ")}.`,
     );
   }
   return profile;
@@ -308,11 +408,11 @@ function profileRule(rule, profile) {
   };
 }
 
-function assessPolicy(command, { allowHighRisk, overrideReason, profileId }) {
+function assessPolicy(command, { allowHighRisk, overrideReason, profileId, policyConfig }) {
   const name = commandName(command);
   const args = command.slice(1);
   const context = { command, name, args };
-  const profile = policyProfile(profileId);
+  const profile = policyProfile(profileId, policyConfig);
   const matchedRules = POLICY_RULES.filter((rule) => rule.matches(context)).map(
     ({ matches, ...rule }) => profileRule(rule, profile),
   );
@@ -364,6 +464,12 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId }) {
       profileId: profile.profileId,
       name: profile.name,
       description: profile.description,
+    },
+    policyConfig: {
+      schemaVersion: policyConfig.schemaVersion,
+      sourcePath: policyConfig.sourcePath,
+      defaultProfile: policyConfig.defaultProfile,
+      profileCount: Object.keys(policyConfig.profiles).length,
     },
     engine: {
       name: "wutai_cli_policy",
@@ -699,10 +805,13 @@ async function main() {
   const commandCwd = resolve(options.cwd);
   const outputRoot = resolve(options.outputDir);
   const commandText = commandLine(command);
+  const policyConfig = await loadPolicyConfig(options.policyConfig);
+  const profileId = options.policyProfile ?? policyConfig.defaultProfile;
   const policy = assessPolicy(command, {
     allowHighRisk: options.allowHighRisk,
     overrideReason: options.overrideReason,
-    profileId: options.policyProfile,
+    profileId,
+    policyConfig,
   });
   const deniedByPolicy = policy.decision === "deny";
   const executionMode = options.dryRun ? "dry_run" : "execute";

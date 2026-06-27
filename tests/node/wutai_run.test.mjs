@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp, readFile, readdir } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +66,8 @@ test("wutai_run writes a completed local-script work packet", async () => {
   assert.equal(policy.schemaVersion, 2);
   assert.equal(policy.policyVersion, "wutai-cli-policy-v0.2");
   assert.equal(policy.profile.profileId, "standard");
+  assert.match(policy.policyConfig.sourcePath, /wutai-cli-policy-profiles\.json$/);
+  assert.equal(policy.policyConfig.defaultProfile, "standard");
   assert.equal(policy.engine.name, "wutai_cli_policy");
   assert.equal(policy.riskProfile.matchedRuleCount, 0);
   assert.equal(policy.executionMode, "execute");
@@ -275,6 +277,61 @@ test("wutai_run strict policy profile escalates warning rules to deny", async ()
   assert.equal(trace.executed, false);
   assert.equal(audit.toolCalls.length, 0);
   assert.equal(ledger.task.status, "cancelled");
+});
+
+test("wutai_run loads a custom policy profile config", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-profile-config-"));
+  const configRoot = await mkdtemp(join(tmpdir(), "wutai-run-config-"));
+  const configPath = join(configRoot, "profiles.json");
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        kind: "wutai.cli_policy_profile_config",
+        defaultProfile: "review_all",
+        profiles: {
+          review_all: {
+            profileId: "review_all",
+            name: "Review All",
+            description: "Escalate every warning rule into a review stop.",
+            warningAction: "deny",
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--policy-config",
+      configPath,
+      "--output-dir",
+      outputRoot,
+      "--",
+      process.execPath,
+      "--inspect=0",
+      "-e",
+      "console.log('custom profile should not execute')",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 3);
+  const { manifest, policy, trace } = await latestPacket(outputRoot);
+
+  assert.equal(policy.profile.profileId, "review_all");
+  assert.equal(policy.profile.name, "Review All");
+  assert.equal(policy.policyConfig.sourcePath, configPath);
+  assert.equal(policy.policyConfig.defaultProfile, "review_all");
+  assert.equal(policy.policyConfig.profileCount, 1);
+  assert.equal(policy.matchedRules[0].effectiveAction, "deny");
+  assert.equal(manifest.audit.policyProfile, "review_all");
+  assert.equal(trace.executed, false);
 });
 
 test("wutai_run records explicit high-risk override", async () => {
