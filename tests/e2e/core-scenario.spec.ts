@@ -361,6 +361,372 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   expect(JSON.parse(integrityArtifact.content).status).toBe("passed");
 });
 
+test("records a dry-run packet review without desktop execution", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const generatedAt = "2026-06-27T08:30:00.000Z";
+  const taskId = "cli_dry_run_review";
+  const command = "npm install";
+  const argv = ["npm", "install"];
+  const workingDirectory = "/tmp/wutai";
+  const permissions = [
+    {
+      requestId: `${taskId}_permission_local_script_execution`,
+      taskId,
+      status: "pending",
+      types: ["local_script_execution"],
+      scope: [
+        "Review the requested argv through the Wutai developer CLI wrapper without execution",
+        "Apply structured policy preflight before execution",
+        "Policy profile: strict",
+        "Capture bounded stdout and stderr summaries",
+        "No shell expansion",
+        "No sandboxing",
+        "No credential mediation",
+      ],
+      createdAt: generatedAt,
+    },
+    {
+      requestId: `${taskId}_permission_artifact_write`,
+      taskId,
+      status: "approved",
+      types: ["artifact_write"],
+      scope: [
+        "Write a new local work packet",
+        "Write policy, trace, ledger, audit, report, and manifest artifacts",
+        "Do not modify existing work packets",
+      ],
+      createdAt: generatedAt,
+      resolvedAt: generatedAt,
+    },
+  ];
+  const policy = {
+    schemaVersion: 2,
+    kind: "wutai.cli_policy_preflight",
+    policyVersion: "wutai-cli-policy-v0.2",
+    profile: {
+      profileId: "strict",
+      name: "Strict",
+      description:
+        "Deny high-risk rules and escalate medium-risk warning rules to deny.",
+    },
+    engine: {
+      name: "wutai_cli_policy",
+      version: "0.2",
+      ruleCount: 8,
+    },
+    decision: "deny",
+    highestSeverity: "medium",
+    allowHighRisk: false,
+    override: {
+      requested: false,
+      applied: false,
+      reason: null,
+      appliedRuleIds: [],
+    },
+    matchedRules: [
+      {
+        ruleId: "dependency_install_or_update",
+        category: "dependency_mutation",
+        severity: "medium",
+        defaultAction: "warn",
+        overrideable: false,
+        message: "Dependency installation or update can modify local code or tools.",
+        reviewScope: ["dependency tree", "lockfiles", "local toolchain"],
+        effectiveAction: "deny",
+        profileEscalated: true,
+      },
+    ],
+    riskProfile: {
+      matchedRuleCount: 1,
+      severityCounts: { medium: 1 },
+      defaultActionCounts: { warn: 1 },
+      actionCounts: { deny: 1 },
+      highestSeverity: "medium",
+    },
+    decisionRationale: [
+      "Denied because 1 matched rule requires pre-execution review.",
+      "Use --allow-high-risk only when the caller intentionally accepts the recorded boundary.",
+    ],
+    reviewScope: ["dependency tree", "lockfiles", "local toolchain"],
+    summary: "Policy preflight denied execution before the command ran.",
+    limitation:
+      "This structured rule set is intentionally incomplete and is not a sandbox, credential broker, filesystem policy, or complete shell safety policy.",
+    taskId,
+    generatedAt,
+    command,
+    argv,
+    workingDirectory,
+    executionMode: "dry_run",
+    dryRun: true,
+  };
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.local_script_trace",
+    taskId,
+    generatedAt,
+    captureMode: "cli_wrapper",
+    command,
+    argv,
+    workingDirectory,
+    dryRun: true,
+    executed: false,
+    startedAt: generatedAt,
+    completedAt: generatedAt,
+    exitCode: null,
+    stdoutSummary: "No output captured.",
+    stderrSummary: "Dry-run review completed. Command was not executed.",
+    touchedFiles: [],
+    producedArtifacts: [],
+  };
+  const events = [
+    {
+      eventId: `${taskId}_event_1`,
+      taskId,
+      timestamp: generatedAt,
+      type: "TaskStarted",
+      summary: "Started Wutai CLI wrapper session.",
+      visibility: "user",
+    },
+    {
+      eventId: `${taskId}_event_2`,
+      taskId,
+      timestamp: generatedAt,
+      type: "PermissionRequested",
+      summary: "Declared local-script execution and policy boundary.",
+      details: permissions[0].scope.join("; "),
+      visibility: "user",
+    },
+    {
+      eventId: `${taskId}_event_3`,
+      taskId,
+      timestamp: generatedAt,
+      type: "HumanConfirmationNeeded",
+      summary: "Dry-run policy review completed; execution is still pending.",
+      details: policy.summary,
+      visibility: "user",
+    },
+    {
+      eventId: `${taskId}_event_4`,
+      taskId,
+      timestamp: generatedAt,
+      type: "ArtifactCreated",
+      summary: "Saved manifest, report, policy, trace, ledger, and audit artifacts.",
+      visibility: "user",
+    },
+    {
+      eventId: `${taskId}_event_5`,
+      taskId,
+      timestamp: generatedAt,
+      type: "TaskCompleted",
+      summary: "Wutai CLI wrapper dry-run review completed.",
+      details: trace.stderrSummary,
+      visibility: "user",
+    },
+  ];
+  const ledger = {
+    schemaVersion: 1,
+    kind: "wutai.session_ledger",
+    generatedAt,
+    task: {
+      taskId,
+      title: `CLI dry-run review: ${command}`,
+      userRequest: `Review local command without execution: ${command}`,
+      status: "completed_with_warnings",
+      plan: [
+        "Run policy preflight for the explicit CLI invocation.",
+        "Generate a dry-run review packet without spawning the command.",
+        "Record policy profile, decision, review scope, and pending execution boundary.",
+        "Save manifest, report, policy, trace, ledger, and audit artifacts.",
+      ],
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+      events,
+      permissions,
+      sources: [],
+      artifacts: [],
+    },
+  };
+  const audit = {
+    schemaVersion: 1,
+    kind: "wutai.session_audit",
+    taskId,
+    generatedAt,
+    permissions,
+    policy,
+    events,
+    executionMode: "dry_run",
+    toolCalls: [],
+    runtimeEvents: [],
+    credentialGrants: [],
+  };
+  const reportContent = `# Wutai CLI Run Packet
+
+## Command
+
+\`${command}\`
+
+## Policy Preflight
+
+- Decision: deny
+- Policy profile: strict
+- Execution mode: dry_run
+- Matched rules: dependency_install_or_update
+`;
+  const policyContent = JSON.stringify(policy, null, 2);
+  const traceContent = JSON.stringify(trace, null, 2);
+  const ledgerContent = JSON.stringify(ledger, null, 2);
+  const auditContent = JSON.stringify(audit, null, 2);
+  const manifest = {
+    schemaVersion: 2,
+    kind: "wutai.work_packet_manifest",
+    packetId: `${taskId}_work_packet`,
+    packetType: "local_script",
+    taskId,
+    sessionId: taskId,
+    session: {
+      sessionId: taskId,
+      subject: ledger.task.title,
+      command,
+      workingDirectory,
+      startedAt: generatedAt,
+      completedAt: generatedAt,
+      exitCode: null,
+      importedTrace: false,
+      executionMode: "dry_run",
+      dryRun: true,
+    },
+    title: ledger.task.title,
+    status: ledger.task.status,
+    userRequest: ledger.task.userRequest,
+    generatedAt,
+    producer: {
+      name: "wutai",
+      adapter: "wutaiRunCli",
+      runtime: "node child_process spawn",
+    },
+    permissions,
+    audit: {
+      eventCount: events.length,
+      eventTypeCounts: {
+        TaskStarted: 1,
+        PermissionRequested: 1,
+        HumanConfirmationNeeded: 1,
+        ArtifactCreated: 1,
+        TaskCompleted: 1,
+      },
+      permissionDecisionCount: 1,
+      toolCallCount: 0,
+      runtimeEventCount: 0,
+      credentialPurposes: [],
+      auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
+      policyDecision: "deny",
+      policyProfile: "strict",
+      executionMode: "dry_run",
+    },
+    artifacts: [
+      manifestArtifact("report.md", "markdown", reportContent, generatedAt),
+      manifestArtifact("policy.json", "json", policyContent, generatedAt),
+      manifestArtifact("trace.json", "json", traceContent, generatedAt),
+      manifestArtifact("ledger.json", "json", ledgerContent, generatedAt),
+      manifestArtifact("audit.json", "json", auditContent, generatedAt),
+    ],
+    evidence: { status: "not_available", readyForTrust: false },
+    coverage: {
+      captured: ["policy_preflight", "permission_record", "dry_run_review"],
+      blindSpots: ["No process sandbox, filesystem policy, or credential mediation is active."],
+      enforcement: ["Dry-run mode generates a review packet without executing the command."],
+    },
+    humanReview: { attestation: "not_recorded" },
+  };
+
+  await page.getByLabel("CLI packet files").setInputFiles([
+    {
+      name: "manifest.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(manifest, null, 2)),
+    },
+    {
+      name: "report.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(reportContent),
+    },
+    {
+      name: "policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(policyContent),
+    },
+    {
+      name: "trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(traceContent),
+    },
+    {
+      name: "ledger.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(ledgerContent),
+    },
+    {
+      name: "audit.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(auditContent),
+    },
+  ]);
+
+  const dryRunReview = page.getByLabel("Dry-run Review");
+  await expect(dryRunReview).toBeVisible();
+  await expect(page.getByText("Permission required")).toHaveCount(0);
+  await expect(
+    dryRunReview.getByText(
+      "Execution is still pending. Recording a decision here updates local review history only; Wutai desktop does not execute this command.",
+    ),
+  ).toBeVisible();
+  await expect(dryRunReview.getByText("strict", { exact: true })).toBeVisible();
+  await expect(dryRunReview.getByText("dry_run", { exact: true })).toBeVisible();
+
+  await dryRunReview.getByRole("button", { name: "Record approve" }).click();
+
+  await expect(dryRunReview.getByText("approved", { exact: true })).toBeVisible();
+  await expect(
+    dryRunReview.getByText(
+      "Human reviewer approved the dry-run packet. Wutai desktop did not execute the command.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download review.json" }),
+  ).toBeVisible();
+
+  const reviewedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const reviewArtifact = reviewedTask.artifacts.find(
+    (item: { name: string }) => item.name === "review.json",
+  );
+  const review = JSON.parse(reviewArtifact.content);
+  const executionPermission = reviewedTask.permissions.find(
+    (permission: { types: string[] }) =>
+      permission.types.includes("local_script_execution"),
+  );
+
+  expect(reviewedTask.status).toBe("completed_with_warnings");
+  expect(executionPermission.status).toBe("approved");
+  expect(review.kind).toBe("wutai.dry_run_review");
+  expect(review.decision).toBe("approved");
+  expect(review.command).toBe(command);
+  expect(review.policyProfile).toBe("strict");
+  expect(review.executionMode).toBe("dry_run");
+  expect(review.note).toContain("Wutai desktop did not execute the command.");
+  expect(review.limitation).toContain("It does not execute, sandbox, or supervise");
+  expect(
+    reviewedTask.events.some((event: { summary: string }) =>
+      event.summary.includes("Wutai desktop did not execute the command"),
+    ),
+  ).toBe(true);
+});
+
 test("imports a CLI wrapper packet directory and flags manifest hash mismatches", async ({
   page,
 }) => {

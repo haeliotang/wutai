@@ -76,7 +76,8 @@ Implemented:
 - Desktop review import for CLI wrapper packets. Select the packet directory,
   or select `manifest.json` plus sibling artifacts, to add the run to local task
   history, verify manifest artifact hashes, and inspect policy, trace, ledger,
-  audit, and integrity artifacts.
+  audit, and integrity artifacts. Dry-run packets with pending execution can be
+  marked approved or denied as a local review record only.
 
 Each completed research task writes a local work packet:
 
@@ -109,10 +110,17 @@ ledger.json
 audit.json
 ```
 
-Each imported CLI wrapper packet also gets a local review artifact:
+Each imported CLI wrapper packet also gets a local integrity artifact:
 
 ```text
 integrity.json
+```
+
+If a dry-run packet is approved or denied in the desktop/web review surface,
+Wutai also writes a local review artifact:
+
+```text
+review.json
 ```
 
 Not implemented:
@@ -222,8 +230,10 @@ choose `Import CLI packet directory`. The file-based fallback is `Import CLI
 packet files`, then select `manifest.json`, `report.md`, `policy.json`,
 `trace.json`, `ledger.json`, and `audit.json` from the packet directory. The
 import recomputes selected artifact SHA-256 values against the manifest and
-writes `integrity.json` into local task history. It is review-only; the desktop
-UI does not re-run the command.
+writes `integrity.json` into local task history. If the packet is a dry-run with
+pending local-script execution permission, the review panel can record approve or
+deny into `review.json`. It is review-only; the desktop UI does not run or re-run
+the command.
 
 ## Optional Real Research Adapter
 

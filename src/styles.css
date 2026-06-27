@@ -534,6 +534,7 @@ select:focus {
   line-height: 1.45;
 }
 
+.dry-run-review-panel,
 .integrity-panel,
 .audit-detail-panel {
   display: grid;
@@ -544,6 +545,7 @@ select:focus {
   background: #07090a;
 }
 
+.dry-run-review-panel .panel-header h3,
 .integrity-panel .panel-header h3,
 .audit-detail-panel .panel-header h3 {
   color: #f4f1e8;
@@ -551,6 +553,7 @@ select:focus {
   font-weight: 600;
 }
 
+.dry-run-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
 .audit-detail-panel .panel-header > strong {
   color: #d6e8c6;
@@ -559,9 +562,48 @@ select:focus {
   text-transform: uppercase;
 }
 
+.dry-run-review-panel > p,
 .integrity-panel > p {
   color: #d4d1c5;
   line-height: 1.5;
+}
+
+.dry-run-review-panel {
+  border-color: #6f5b22;
+  background: #120f07;
+}
+
+.dry-run-review-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dry-run-review-grid span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  padding: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
+.dry-run-review-grid strong {
+  color: #f4f1e8;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dry-run-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dry-run-review-actions button {
+  padding: 0 14px;
 }
 
 .integrity-passed {
@@ -868,18 +910,19 @@ select:focus {
   .status-grid,
   .permission-box,
   .provider-setup-form,
-	  .provider-advanced-grid,
-	  .evidence-metrics,
-	  .cli-review-grid,
-	  .integrity-metrics {
-	    grid-template-columns: 1fr;
-	  }
+  .provider-advanced-grid,
+  .evidence-metrics,
+  .cli-review-grid,
+  .dry-run-review-grid,
+  .integrity-metrics {
+    grid-template-columns: 1fr;
+  }
 
-	  .cli-rule-list > div,
-	  .integrity-check-list > div,
-	  .audit-record dl div {
-	    grid-template-columns: 1fr;
-	  }
+  .cli-rule-list > div,
+  .integrity-check-list > div,
+  .audit-record dl div {
+    grid-template-columns: 1fr;
+  }
 
   .profile-toolbar {
     grid-template-columns: minmax(0, 1fr) auto;

@@ -30,14 +30,20 @@ const CORE_SCENARIO =
 interface CliPolicyArtifact {
   decision?: string;
   highestSeverity?: string;
+  profile?: { profileId?: string; name?: string };
+  executionMode?: "execute" | "dry_run";
+  dryRun?: boolean;
   matchedRules?: Array<{ ruleId?: string; message?: string }>;
   summary?: string;
+  reviewScope?: string[];
+  decisionRationale?: string[];
 }
 
 interface CliTraceArtifact {
   command?: string;
   workingDirectory?: string;
-  exitCode?: number;
+  exitCode?: number | null;
+  dryRun?: boolean;
   executed?: boolean;
   stdoutSummary?: string;
   stderrSummary?: string;
@@ -46,8 +52,19 @@ interface CliTraceArtifact {
 interface WorkPacketManifestArtifact {
   packetType?: string;
   producer?: { adapter?: string };
-  audit?: { policyDecision?: string; toolCallCount?: number; runtimeEventCount?: number };
-  session?: { command?: string | null; exitCode?: number | null };
+  audit?: {
+    policyDecision?: string;
+    policyProfile?: string;
+    executionMode?: string;
+    toolCallCount?: number;
+    runtimeEventCount?: number;
+  };
+  session?: {
+    command?: string | null;
+    dryRun?: boolean;
+    executionMode?: string;
+    exitCode?: number | null;
+  };
 }
 
 interface CliIntegrityArtifact {
@@ -80,6 +97,19 @@ interface CliAuditArtifact {
   toolCalls?: Array<Record<string, unknown>>;
   runtimeEvents?: Array<Record<string, unknown>>;
   credentialGrants?: Array<Record<string, unknown>>;
+}
+
+interface CliReviewArtifact {
+  schemaVersion?: number;
+  kind?: string;
+  taskId?: string;
+  generatedAt?: string;
+  decision?: "approved" | "denied";
+  command?: string | null;
+  policyProfile?: string | null;
+  executionMode?: string | null;
+  note?: string;
+  limitation?: string;
 }
 
 function formatTime(value: string) {
@@ -414,7 +444,11 @@ export default function App() {
   }
 
   const pendingPermission = activeTask?.permissions.find(
-    (permission) => permission.status === "pending",
+    (permission) =>
+      permission.status === "pending" &&
+      permission.types.some((type) =>
+        ["public_web_search", "public_webpage_read"].includes(type),
+      ),
   );
 
   const reportArtifact = useMemo(
@@ -464,6 +498,13 @@ export default function App() {
     [activeTask],
   );
 
+  const reviewArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "review.json") ??
+      null,
+    [activeTask],
+  );
+
   const verificationArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "verification.json") ??
@@ -499,8 +540,42 @@ export default function App() {
       integrity: integrityArtifact
         ? parseJsonArtifact<CliIntegrityArtifact>(integrityArtifact.content)
         : null,
+      review: reviewArtifact
+        ? parseJsonArtifact<CliReviewArtifact>(reviewArtifact.content)
+        : null,
     };
-  }, [auditArtifact, integrityArtifact, manifestArtifact, policyArtifact, traceArtifact]);
+  }, [
+    auditArtifact,
+    integrityArtifact,
+    manifestArtifact,
+    policyArtifact,
+    reviewArtifact,
+    traceArtifact,
+  ]);
+
+  const cliDryRunReview = useMemo(() => {
+    if (!activeTask || !cliPacketReview) return null;
+
+    const dryRun =
+      cliPacketReview.policy?.dryRun === true ||
+      cliPacketReview.policy?.executionMode === "dry_run" ||
+      cliPacketReview.trace?.dryRun === true ||
+      cliPacketReview.manifest.session?.dryRun === true ||
+      cliPacketReview.manifest.session?.executionMode === "dry_run" ||
+      cliPacketReview.manifest.audit?.executionMode === "dry_run";
+    if (!dryRun) return null;
+
+    const pendingExecutionPermission = activeTask.permissions.find(
+      (permission) =>
+        permission.types.includes("local_script_execution") &&
+        permission.status === "pending",
+    );
+
+    return {
+      pendingExecutionPermission,
+      review: cliPacketReview.review,
+    };
+  }, [activeTask, cliPacketReview]);
 
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
@@ -566,6 +641,87 @@ export default function App() {
         cliPacketInputRef.current.value = "";
       }
     }
+  }
+
+  async function recordDryRunReview(decision: "approved" | "denied") {
+    if (!activeTask || !taskStore || !cliPacketReview || !cliDryRunReview) return;
+
+    const pendingPermission = cliDryRunReview.pendingExecutionPermission;
+    if (!pendingPermission) {
+      setError("This dry-run packet no longer has a pending execution permission.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const command =
+      cliPacketReview.trace?.command ??
+      cliPacketReview.manifest.session?.command ??
+      null;
+    const review: CliReviewArtifact = {
+      schemaVersion: 1,
+      kind: "wutai.dry_run_review",
+      taskId: activeTask.taskId,
+      generatedAt: now,
+      decision,
+      command,
+      policyProfile:
+        cliPacketReview.policy?.profile?.profileId ??
+        cliPacketReview.manifest.audit?.policyProfile ??
+        null,
+      executionMode:
+        cliPacketReview.policy?.executionMode ??
+        cliPacketReview.manifest.audit?.executionMode ??
+        cliPacketReview.manifest.session?.executionMode ??
+        "dry_run",
+      note:
+        decision === "approved"
+          ? "Human reviewer approved the dry-run packet. Wutai desktop did not execute the command."
+          : "Human reviewer denied the dry-run packet. Wutai desktop did not execute the command.",
+      limitation:
+        "This is a local review record only. It does not execute, sandbox, or supervise the command.",
+    };
+    const reviewRecord: WutaiTask["artifacts"][number] = {
+      artifactId: `${activeTask.taskId}_artifact_review_json`,
+      taskId: activeTask.taskId,
+      type: "json",
+      name: "review.json",
+      virtualPath: `imported/${activeTask.taskId}/review.json`,
+      content: JSON.stringify(review, null, 2),
+      createdAt: now,
+    };
+    const withoutPriorReview = activeTask.artifacts.filter(
+      (artifact) => artifact.name !== "review.json",
+    );
+    let nextTask: WutaiTask = {
+      ...activeTask,
+      status: decision === "denied" ? "cancelled" : "completed_with_warnings",
+      updatedAt: now,
+      permissions: activeTask.permissions.map((permission) =>
+        permission.requestId === pendingPermission.requestId
+          ? { ...permission, status: decision, resolvedAt: now }
+          : permission,
+      ),
+      artifacts: [...withoutPriorReview, reviewRecord],
+    };
+
+    nextTask = appendEvent(nextTask, {
+      type: "PermissionResolved",
+      summary:
+        decision === "approved"
+          ? "Dry-run execution review approved; Wutai desktop did not execute the command."
+          : "Dry-run execution review denied; Wutai desktop did not execute the command.",
+      details: `Review artifact: review.json. Command: ${command ?? "unavailable"}.`,
+      visibility: "user",
+    });
+    nextTask = appendEvent(nextTask, {
+      type: "ArtifactCreated",
+      summary: "Saved dry-run review artifact.",
+      details: "review.json records the local review decision only.",
+      visibility: "user",
+    });
+
+    setError(null);
+    await persist(nextTask);
   }
 
   async function resolvePermission(status: "approved" | "denied") {
@@ -1295,6 +1451,71 @@ export default function App() {
                       cliPacketReview.manifest.session?.command ??
                       "Command unavailable"}
                   </p>
+                  {cliDryRunReview && (
+                    <div className="dry-run-review-panel" aria-label="Dry-run Review">
+                      <div className="panel-header">
+                        <h3>Dry-run Review</h3>
+                        <strong>
+                          {cliDryRunReview.review?.decision ??
+                            (cliDryRunReview.pendingExecutionPermission
+                              ? "pending"
+                              : "resolved")}
+                        </strong>
+                      </div>
+                      <div className="dry-run-review-grid">
+                        <span>
+                          Profile{" "}
+                          <strong>
+                            {cliPacketReview.policy?.profile?.profileId ??
+                              cliPacketReview.manifest.audit?.policyProfile ??
+                              "unknown"}
+                          </strong>
+                        </span>
+                        <span>
+                          Execution{" "}
+                          <strong>
+                            {cliPacketReview.policy?.executionMode ??
+                              cliPacketReview.manifest.audit?.executionMode ??
+                              cliPacketReview.manifest.session?.executionMode ??
+                              "dry_run"}
+                          </strong>
+                        </span>
+                        <span>
+                          Command ran{" "}
+                          <strong>{cliPacketReview.trace?.executed ? "yes" : "no"}</strong>
+                        </span>
+                      </div>
+                      {cliDryRunReview.review ? (
+                        <p>
+                          {cliDryRunReview.review.note ??
+                            "Dry-run review decision recorded."}
+                        </p>
+                      ) : (
+                        <p>
+                          Execution is still pending. Recording a decision here
+                          updates local review history only; Wutai desktop does
+                          not execute this command.
+                        </p>
+                      )}
+                      {cliDryRunReview.pendingExecutionPermission &&
+                        !cliDryRunReview.review && (
+                          <div className="dry-run-review-actions">
+                            <button
+                              type="button"
+                              onClick={() => void recordDryRunReview("approved")}
+                            >
+                              Record approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void recordDryRunReview("denied")}
+                            >
+                              Record deny
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  )}
                   {cliPacketReview.policy?.matchedRules?.length ? (
                     <div className="cli-rule-list">
                       {cliPacketReview.policy.matchedRules.map((rule, index) => (
@@ -1423,6 +1644,7 @@ export default function App() {
                       ledgerArtifact,
                       auditArtifact,
                       integrityArtifact,
+                      reviewArtifact,
                     ]
                       .filter(Boolean)
                       .map((artifact) => (

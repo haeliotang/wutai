@@ -97,6 +97,9 @@ and create a work packet. Its current boundary is structured but incomplete:
   rules to deny.
 - It supports `--dry-run`, which writes a review packet without spawning the
   command and leaves execution permission pending.
+- The desktop/web packet review surface can record dry-run approve or deny into
+  local `review.json`; that record does not spawn, sandbox, or supervise the
+  command.
 - It records policy rule category, severity, default action, override state,
   rationale, and review scope in `policy.json`.
 - It records argv, working directory, policy decision, exit code, bounded
