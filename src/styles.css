@@ -571,6 +571,7 @@ select:focus {
 .dry-run-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
 .provenance-panel .panel-header > strong,
+.provenance-panel .panel-actions > strong,
 .audit-detail-panel .panel-header > strong {
   color: #d6e8c6;
   font-size: 12px;

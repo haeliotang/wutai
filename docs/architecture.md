@@ -182,6 +182,6 @@ understand what happened after a task completes.
 6. Artifact generation.
 7. Evidence Gate and audit artifact.
 8. Development CLI wrapper and trace importer for local-script sessions.
-9. Signed packet provenance, trusted-key enrollment hardening, rule override hardening, imported external-agent trace source, MCP trace import, and local file ingestion.
+9. Signed packet provenance, trusted-key policy management, rule override hardening, imported external-agent trace source, MCP trace import, and local file ingestion.
 10. Credential broker for task-scoped provider access.
 11. Live MCP proxy, browser/computer-use adapters, and broader runtime permission enforcement.

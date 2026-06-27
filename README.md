@@ -96,9 +96,9 @@ Implemented:
   history, verify manifest artifact hashes, record local provenance checks,
   inspect policy, trace, ledger, filtered audit details, integrity, and
   provenance artifacts, verify optional packet attestation signatures, and match
-  verified signatures against an explicitly loaded local trusted-producer
-  policy. Dry-run packets with pending execution can be marked approved or
-  denied as a local review record only.
+  verified signatures against an explicitly loaded or locally enrolled
+  trusted-producer policy. Dry-run packets with pending execution can be marked
+  approved or denied as a local review record only.
 
 Each completed research task writes a local work packet:
 
@@ -301,7 +301,7 @@ This writes `attestation.json` beside the packet. The attestation signs the
 final `manifest.json` bytes with ECDSA P-256 SHA-256 and includes the public key
 needed for verification. This is a tamper check, not a trust guarantee: Wutai
 only treats the producer as trusted when the public key hash also matches a
-local trusted-producer policy loaded by the user.
+local trusted-producer policy loaded or explicitly enrolled by the user.
 
 Trusted-producer policy files use this shape:
 
@@ -325,8 +325,11 @@ Trusted-producer policy files use this shape:
 
 The example file is
 `config/wutai-trusted-producers.example.json`. Load a policy with `Load trust
-policy` before importing a signed packet. A packet cannot make itself trusted by
-including its own policy; the policy is a local UI setting.
+policy` before importing a signed packet, or import a signed packet first and
+use `Trust this producer key` after Wutai verifies the attestation signature.
+Enrollment writes a local policy entry scoped to the observed producer adapter
+and packet type, then re-checks packet provenance. A packet cannot make itself
+trusted by including its own policy; trust remains a local UI setting.
 
 Boundary: this wrapper does not sandbox the process, mediate credentials, block
 network or filesystem access, or enforce a complete destructive-command policy.
@@ -343,10 +346,12 @@ against the manifest and writes `integrity.json` and `provenance.json` into
 local task history. The provenance check records manifest hash, producer fields,
 required artifact presence, schema-kind consistency, and optional attestation
 verification. A valid attestation remains untrusted unless the public key hash
-matches the loaded local trusted-producer policy. If the packet is a dry-run
-with pending local-script execution permission, the review panel can record
-approve or deny into `review.json`. It is review-only; the desktop UI does not
-run or re-run the command.
+matches the loaded or enrolled local trusted-producer policy. If the signature
+is verified but the key is unknown, the review panel can enroll the key for the
+observed producer adapter and packet type. If the packet is a dry-run with
+pending local-script execution permission, the review panel can record approve
+or deny into `review.json`. It is review-only; the desktop UI does not run or
+re-run the command.
 
 ## Optional Real Research Adapter
 
@@ -449,10 +454,10 @@ Near-term engineering work:
   local-script traces, external trace imports, local file ingestion, and
   developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Harden trusted-key enrollment and producer trust policy for signed CLI packets.
+- Harden trusted-key revocation/edit UX for signed CLI packets.
 - Add more regression coverage and validation for externally configurable rule
   overrides.
-- Harden local review artifacts and trusted-key enrollment UX.
+- Harden local review artifacts and trusted-key policy editing.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

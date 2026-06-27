@@ -38,6 +38,7 @@ import {
 } from "./runtime/mcpToolCallRecorder";
 import {
   EMPTY_TRUSTED_PRODUCER_POLICY,
+  enrollTrustedProducerKey,
   parseTrustedProducerPolicy,
   type TrustedProducerPolicy,
 } from "./runtime/trustedProducerPolicy";
@@ -119,6 +120,7 @@ interface CliProvenanceArtifact {
     sha256?: string;
     bytes?: number;
     packetId?: string;
+    packetType?: string;
     producerAdapter?: string;
     producerRuntime?: string;
   };
@@ -807,6 +809,18 @@ export default function App() {
     };
   }, [activeTask, cliPacketReview]);
 
+  const canEnrollTrustedProducerKey = useMemo(() => {
+    const provenance = cliPacketReview?.provenance;
+    if (!provenance) return false;
+    return Boolean(
+      provenance.attestation?.present &&
+        provenance.attestation.verified &&
+        !provenance.attestation.trustedKey &&
+        provenance.attestation.publicKeySha256 &&
+        provenance.trustPolicy?.status !== "revoked",
+    );
+  }, [cliPacketReview]);
+
   const cliAuditGroups = useMemo(
     () => auditRecordGroups(cliPacketReview?.audit ?? null),
     [cliPacketReview],
@@ -938,6 +952,19 @@ export default function App() {
     }
   }
 
+  function saveTrustedProducerPolicyState(
+    policy: TrustedProducerPolicy,
+    message: string,
+  ) {
+    window.localStorage.setItem(
+      TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
+      JSON.stringify(policy, null, 2),
+    );
+    setTrustedProducerPolicy(policy);
+    setTrustedProducerPolicyMessage(message);
+    setError(null);
+  }
+
   async function recheckLocalFileHashes(files: FileList | null) {
     if (
       !activeTask ||
@@ -1009,15 +1036,10 @@ export default function App() {
 
     try {
       const policy = parseTrustedProducerPolicy(await file.text(), file.name);
-      window.localStorage.setItem(
-        TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
-        JSON.stringify(policy, null, 2),
-      );
-      setTrustedProducerPolicy(policy);
-      setTrustedProducerPolicyMessage(
+      saveTrustedProducerPolicyState(
+        policy,
         `Trusted producer policy loaded: ${policy.keys.length} key${policy.keys.length === 1 ? "" : "s"}.`,
       );
-      setError(null);
     } catch (error) {
       setTrustedProducerPolicyMessage(
         error instanceof Error
@@ -1057,6 +1079,73 @@ export default function App() {
       if (cliPacketInputRef.current) {
         cliPacketInputRef.current.value = "";
       }
+    }
+  }
+
+  function cliPacketArtifactsForReimport(task: WutaiTask) {
+    const names = new Set([
+      "manifest.json",
+      "report.md",
+      "policy.json",
+      "trace.json",
+      "ledger.json",
+      "audit.json",
+      "attestation.json",
+    ]);
+    return task.artifacts
+      .filter((artifact) => names.has(artifact.name))
+      .map((artifact) => ({
+        name: artifact.name,
+        text: async () => artifact.content,
+      }));
+  }
+
+  async function enrollCurrentPacketProducerKey() {
+    if (!activeTask || !taskStore || !cliPacketReview?.provenance) return;
+
+    const provenance = cliPacketReview.provenance;
+    const publicKeySha256 = provenance.attestation?.publicKeySha256;
+    const producerAdapter =
+      provenance.manifest?.producerAdapter ??
+      cliPacketReview.manifest.producer?.adapter;
+    const packetType =
+      provenance.manifest?.packetType ?? cliPacketReview.manifest.packetType;
+    if (
+      !provenance.attestation?.verified ||
+      provenance.attestation.trustedKey ||
+      !publicKeySha256 ||
+      !producerAdapter ||
+      !packetType ||
+      provenance.trustPolicy?.status === "revoked"
+    ) {
+      setError("This packet does not have an enrollable verified producer key.");
+      return;
+    }
+
+    setError(null);
+    try {
+      const nextPolicy = enrollTrustedProducerKey(trustedProducerPolicy, {
+        publicKeySha256,
+        producerAdapter,
+        packetType,
+        label: `${producerAdapter} ${shortHash(publicKeySha256)}`,
+        note:
+          "Locally enrolled from a verified packet attestation in Wutai desktop. This does not prove external identity.",
+      });
+      saveTrustedProducerPolicyState(
+        nextPolicy,
+        `Trusted producer key enrolled: ${producerAdapter} ${shortHash(publicKeySha256)}.`,
+      );
+
+      const packetFiles = cliPacketArtifactsForReimport(activeTask);
+      const task = await importCliPacketFiles(packetFiles, nextPolicy);
+      await persist(task);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not enroll the trusted producer key.",
+      );
     }
   }
 
@@ -2098,7 +2187,19 @@ export default function App() {
                     >
                       <div className="panel-header">
                         <h3>Packet Provenance</h3>
-                        <strong>{cliPacketReview.provenance.status ?? "warning"}</strong>
+                        <div className="panel-actions">
+                          {canEnrollTrustedProducerKey && (
+                            <button
+                              type="button"
+                              onClick={enrollCurrentPacketProducerKey}
+                            >
+                              Trust this producer key
+                            </button>
+                          )}
+                          <strong>
+                            {cliPacketReview.provenance.status ?? "warning"}
+                          </strong>
+                        </div>
                       </div>
                       <p>
                         {cliPacketReview.provenance.summary ??

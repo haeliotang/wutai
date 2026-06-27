@@ -116,7 +116,10 @@ and create a work packet. Its current boundary is structured but incomplete:
   producer fields, required artifact presence, schema-kind consistency, and
   optional signature/attestation verification. Missing signatures remain a
   warning. Valid signatures remain untrusted unless the public key hash matches
-  a local trusted-producer policy explicitly loaded by the user.
+  a local trusted-producer policy explicitly loaded or enrolled by the user.
+- When a packet attestation verifies but the key is unknown, the UI can enroll
+  that public key hash into local trusted-producer policy for the observed
+  producer adapter and packet type, then recompute `provenance.json`.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
 - It does not identify every destructive command.
@@ -124,6 +127,9 @@ and create a work packet. Its current boundary is structured but incomplete:
   or credentials inherited from the invoking shell.
 - It does not protect the signing key or prove the private-key holder is a
   trusted Wutai producer.
+- Local key enrollment is a trust decision by the current user. It is not
+  certificate-chain validation, remote identity proof, or remote revocation
+  checking.
 - It does not implement certificate-chain validation, remote revocation checks,
   system keychain-backed trust storage, or automatic key enrollment.
 - It does not make external policy configs safe by default; a local config can

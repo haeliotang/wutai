@@ -29,6 +29,14 @@ export interface TrustedProducerEvaluation {
   key?: TrustedProducerKey;
 }
 
+export interface TrustedProducerEnrollmentInput {
+  publicKeySha256: string;
+  producerAdapter: string;
+  packetType: string;
+  label?: string;
+  note?: string;
+}
+
 export const EMPTY_TRUSTED_PRODUCER_POLICY: TrustedProducerPolicy = {
   schemaVersion: 1,
   kind: "wutai.trusted_producer_policy",
@@ -36,6 +44,23 @@ export const EMPTY_TRUSTED_PRODUCER_POLICY: TrustedProducerPolicy = {
   sourceLabel: "none",
   keys: [],
 };
+
+function uniqueKeyId(keys: TrustedProducerKey[], baseKeyId: string) {
+  const existing = new Set(keys.map((key) => key.keyId));
+  if (!existing.has(baseKeyId)) return baseKeyId;
+
+  let suffix = 2;
+  while (existing.has(`${baseKeyId}-${suffix}`)) suffix += 1;
+  return `${baseKeyId}-${suffix}`;
+}
+
+function slug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 32);
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -182,10 +207,10 @@ export function evaluateTrustedProducerKey(
     };
   }
 
-  const producerMatched = matchingKeys.find(
+  const producerMatches = matchingKeys.filter(
     (key) => !key.producerAdapter || key.producerAdapter === producerAdapter,
   );
-  if (!producerMatched) {
+  if (producerMatches.length === 0) {
     return {
       trusted: false,
       status: "producer_mismatch",
@@ -195,14 +220,16 @@ export function evaluateTrustedProducerKey(
     };
   }
 
-  if (
-    producerMatched.allowedPacketTypes?.length &&
-    (!packetType || !producerMatched.allowedPacketTypes.includes(packetType))
-  ) {
+  const packetTypeMatched = producerMatches.find(
+    (key) =>
+      !key.allowedPacketTypes?.length ||
+      (packetType && key.allowedPacketTypes.includes(packetType)),
+  );
+  if (!packetTypeMatched) {
     return {
       trusted: false,
       status: "packet_type_mismatch",
-      key: producerMatched,
+      key: producerMatches[0],
       message:
         "The attestation key is known, but it is not trusted for this packet type.",
     };
@@ -211,7 +238,67 @@ export function evaluateTrustedProducerKey(
   return {
     trusted: true,
     status: "trusted",
-    key: producerMatched,
+    key: packetTypeMatched,
     message: "The attestation key matches the local trusted producer policy.",
+  };
+}
+
+export function enrollTrustedProducerKey(
+  policy: TrustedProducerPolicy,
+  {
+    publicKeySha256,
+    producerAdapter,
+    packetType,
+    label,
+    note,
+  }: TrustedProducerEnrollmentInput,
+): TrustedProducerPolicy {
+  const normalizedHash = publicKeySha256.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalizedHash)) {
+    throw new Error("Trusted producer enrollment requires a 64-character public key hash.");
+  }
+  if (!producerAdapter.trim()) {
+    throw new Error("Trusted producer enrollment requires a producer adapter.");
+  }
+  if (!packetType.trim()) {
+    throw new Error("Trusted producer enrollment requires a packet type.");
+  }
+
+  const existingExact = policy.keys.find(
+    (key) =>
+      key.publicKeySha256 === normalizedHash &&
+      key.status === "active" &&
+      key.producerAdapter === producerAdapter &&
+      key.allowedPacketTypes?.includes(packetType),
+  );
+  if (existingExact) return policy;
+
+  const baseKeyId = slug(
+    `enrolled-${producerAdapter}-${packetType}-${normalizedHash.slice(0, 12)}`,
+  );
+  const enrolledKey: TrustedProducerKey = {
+    keyId: uniqueKeyId(policy.keys, baseKeyId || `enrolled-${normalizedHash.slice(0, 12)}`),
+    label: label?.trim() || `Local ${producerAdapter} key ${normalizedHash.slice(0, 12)}`,
+    publicKeySha256: normalizedHash,
+    producerAdapter,
+    allowedPacketTypes: [packetType],
+    status: "active",
+    note:
+      note?.trim() ||
+      "Locally enrolled from a verified packet attestation. This does not prove external identity.",
+  };
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.trusted_producer_policy",
+    policyId:
+      policy.keys.length > 0 && policy.policyId !== EMPTY_TRUSTED_PRODUCER_POLICY.policyId
+        ? policy.policyId
+        : "local-enrolled-producers",
+    sourceLabel:
+      policy.keys.length > 0 && policy.sourceLabel !== EMPTY_TRUSTED_PRODUCER_POLICY.sourceLabel
+        ? policy.sourceLabel
+        : "local enrollment",
+    keys: [...policy.keys, enrolledKey],
   };
 }
