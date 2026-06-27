@@ -1,5 +1,8 @@
 # Wutai
 
+<!-- StillMirror maintainer-review badge — advancing-the-core vs upkeep, refreshed weekly in CI; evidence, not a verdict -->
+![StillMirror](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/haeliotang/wutai/stillmirror-badges/maintainer-badge.json)
+
 Wutai is a local trust and evidence layer for agentic work on personal
 computers.
 
