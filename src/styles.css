@@ -630,6 +630,7 @@ select:focus {
 }
 
 .dry-run-review-panel,
+.policy-review-panel,
 .integrity-panel,
 .provenance-panel,
 .audit-detail-panel {
@@ -642,6 +643,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header h3,
+.policy-review-panel .panel-header h3,
 .integrity-panel .panel-header h3,
 .provenance-panel .panel-header h3,
 .audit-detail-panel .panel-header h3 {
@@ -651,6 +653,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header > strong,
+.policy-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
 .provenance-panel .panel-header > strong,
 .provenance-panel .panel-actions > strong,
@@ -662,6 +665,7 @@ select:focus {
 }
 
 .dry-run-review-panel > p,
+.policy-review-panel > p,
 .integrity-panel > p,
 .provenance-panel > p {
   color: #d4d1c5;
@@ -671,6 +675,20 @@ select:focus {
 .dry-run-review-panel {
   border-color: #6f5b22;
   background: #120f07;
+}
+
+.policy-review-passed {
+  border-color: #3c6a36;
+}
+
+.policy-review-warning {
+  border-color: #6f5b22;
+  background: #100f09;
+}
+
+.policy-review-failed {
+  border-color: #7a4a34;
+  background: #120d09;
 }
 
 .dry-run-review-grid {
@@ -760,6 +778,12 @@ select:focus {
   gap: 10px;
 }
 
+.policy-review-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
 .provenance-metrics span {
   display: grid;
   gap: 5px;
@@ -770,7 +794,23 @@ select:focus {
   font-size: 12px;
 }
 
+.policy-review-metrics span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  padding: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
 .provenance-metrics strong {
+  color: #f4f1e8;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.policy-review-metrics strong {
   color: #f4f1e8;
   font-size: 16px;
   overflow-wrap: anywhere;
@@ -813,9 +853,24 @@ select:focus {
   gap: 8px;
 }
 
+.policy-override-list,
+.policy-check-list {
+  display: grid;
+  gap: 8px;
+}
+
 .provenance-check-list > div {
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid #20241e;
+  padding-top: 8px;
+}
+
+.policy-override-list > div,
+.policy-check-list > div {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
   gap: 12px;
   border-top: 1px solid #20241e;
   padding-top: 8px;
@@ -826,13 +881,43 @@ select:focus {
   font-size: 13px;
 }
 
+.policy-override-list strong,
+.policy-check-list strong {
+  color: #f4f1e8;
+  font-size: 13px;
+}
+
 .provenance-check-list p {
   margin-top: 4px;
   color: #b8b6aa;
   line-height: 1.45;
 }
 
+.policy-override-list p,
+.policy-check-list p {
+  margin-top: 4px;
+  color: #b8b6aa;
+  line-height: 1.45;
+}
+
+.policy-override-list small {
+  display: block;
+  margin-top: 4px;
+  color: #9fa497;
+  overflow-wrap: anywhere;
+}
+
 .provenance-check-list code {
+  display: block;
+  margin-top: 4px;
+  color: #95e884;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.policy-override-list code,
+.policy-check-list code,
+.cli-rule-list code {
   display: block;
   margin-top: 4px;
   color: #95e884;
@@ -860,7 +945,23 @@ select:focus {
   text-transform: uppercase;
 }
 
+.policy-review-status {
+  align-self: start;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
 .provenance-check-passed {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.policy-review-check-passed {
   border-color: #95e884;
   color: #95e884;
 }
@@ -870,7 +971,17 @@ select:focus {
   color: #e7d37a;
 }
 
+.policy-review-check-warning {
+  border-color: #e7d37a;
+  color: #e7d37a;
+}
+
 .provenance-check-failed {
+  border-color: #ffb085;
+  color: #ffb085;
+}
+
+.policy-review-check-failed {
   border-color: #ffb085;
   color: #ffb085;
 }
@@ -1131,6 +1242,7 @@ select:focus {
   .evidence-metrics,
   .cli-review-grid,
   .dry-run-review-grid,
+  .policy-review-metrics,
   .integrity-metrics,
   .provenance-metrics {
     grid-template-columns: 1fr;
@@ -1138,6 +1250,8 @@ select:focus {
 
   .cli-rule-list > div,
   .trust-key-row,
+  .policy-override-list > div,
+  .policy-check-list > div,
   .integrity-check-list > div,
   .provenance-check-list > div,
   .audit-record dl div {

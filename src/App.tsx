@@ -56,7 +56,28 @@ interface CliPolicyArtifact {
   profile?: { profileId?: string; name?: string };
   executionMode?: "execute" | "dry_run";
   dryRun?: boolean;
-  matchedRules?: Array<{ ruleId?: string; message?: string }>;
+  override?: {
+    requested?: boolean;
+    applied?: boolean;
+    reason?: string | null;
+    appliedRuleIds?: string[];
+  };
+  matchedRules?: Array<{
+    ruleId?: string;
+    category?: string;
+    severity?: string;
+    defaultAction?: string;
+    effectiveAction?: string;
+    profileEscalated?: boolean;
+    message?: string;
+    reviewScope?: string[];
+    ruleOverride?: {
+      applied?: boolean;
+      baseEffectiveAction?: string;
+      effectiveAction?: string;
+      reason?: string | null;
+    };
+  }>;
   summary?: string;
   reviewScope?: string[];
   decisionRationale?: string[];
@@ -157,6 +178,52 @@ interface CliProvenanceArtifact {
   limitation?: string;
 }
 
+interface CliPolicyReviewArtifact {
+  status?: "passed" | "warning" | "failed";
+  summary?: string;
+  policy?: {
+    decision?: string;
+    highestSeverity?: string;
+    profileId?: string;
+    profileName?: string;
+    matchedRuleCount?: number;
+  };
+  explicitOverride?: {
+    requested?: boolean;
+    applied?: boolean;
+    reason?: string;
+    appliedRuleIds?: string[];
+  };
+  ruleOverrides?: Array<{
+    ruleId?: string;
+    category?: string;
+    severity?: string;
+    defaultAction?: string;
+    effectiveAction?: string;
+    profileEscalated?: boolean;
+    source?: string;
+    reason?: string;
+    message?: string;
+    reviewScope?: string[];
+  }>;
+  metrics?: {
+    matchedRuleCount?: number;
+    ruleOverrideCount?: number;
+    missingOverrideReasonCount?: number;
+    explicitOverrideWithoutReason?: boolean;
+    highRiskAllowCount?: number;
+    warnings?: number;
+    failed?: number;
+  };
+  checks?: Array<{
+    name?: string;
+    status?: "passed" | "warning" | "failed";
+    message?: string;
+    evidence?: string;
+  }>;
+  limitation?: string;
+}
+
 interface CliAuditArtifact {
   permissions?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
@@ -244,6 +311,13 @@ function shortHash(value?: string) {
   if (!value) return "n/a";
   if (value.length <= 18) return value;
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
+}
+
+function policyReviewSourceLabel(value?: string) {
+  if (value === "explicit_rule_override") return "explicit override";
+  if (value === "policy_profile") return "policy profile";
+  if (value === "effective_action_change") return "action change";
+  return "change";
 }
 
 function formatAuditValue(value: unknown) {
@@ -693,6 +767,13 @@ export default function App() {
     [activeTask],
   );
 
+  const policyReviewArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "policy-review.json") ??
+      null,
+    [activeTask],
+  );
+
   const reviewArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "review.json") ??
@@ -750,6 +831,9 @@ export default function App() {
       provenance: provenanceArtifact
         ? parseJsonArtifact<CliProvenanceArtifact>(provenanceArtifact.content)
         : null,
+      policyReview: policyReviewArtifact
+        ? parseJsonArtifact<CliPolicyReviewArtifact>(policyReviewArtifact.content)
+        : null,
       review: reviewArtifact
         ? parseJsonArtifact<CliReviewArtifact>(reviewArtifact.content)
         : null,
@@ -759,6 +843,7 @@ export default function App() {
     integrityArtifact,
     manifestArtifact,
     policyArtifact,
+    policyReviewArtifact,
     provenanceArtifact,
     reviewArtifact,
     traceArtifact,
@@ -2234,12 +2319,130 @@ export default function App() {
                           <span className="preflight-status preflight-warning">
                             {rule.ruleId ?? "rule"}
                           </span>
-                          <p>{rule.message ?? "Matched policy rule."}</p>
+                          <div>
+                            <p>{rule.message ?? "Matched policy rule."}</p>
+                            <code>
+                              {rule.defaultAction ??
+                                rule.ruleOverride?.baseEffectiveAction ??
+                                "n/a"}{" "}
+                              -&gt;{" "}
+                              {rule.effectiveAction ??
+                                rule.ruleOverride?.effectiveAction ??
+                                "n/a"}
+                            </code>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <p className="muted">No policy rules matched this packet.</p>
+                  )}
+
+                  {cliPacketReview.policyReview && (
+                    <div
+                      className={`policy-review-panel policy-review-${cliPacketReview.policyReview.status ?? "warning"}`}
+                    >
+                      <div className="panel-header">
+                        <h3>Policy Override Review</h3>
+                        <strong>{cliPacketReview.policyReview.status ?? "warning"}</strong>
+                      </div>
+                      <p>
+                        {cliPacketReview.policyReview.summary ??
+                          "Policy override review unavailable."}
+                      </p>
+                      <div className="policy-review-metrics">
+                        <span>
+                          Matched{" "}
+                          <strong>
+                            {cliPacketReview.policyReview.metrics?.matchedRuleCount ??
+                              cliPacketReview.policyReview.policy?.matchedRuleCount ??
+                              0}
+                          </strong>
+                        </span>
+                        <span>
+                          Changes{" "}
+                          <strong>
+                            {cliPacketReview.policyReview.metrics?.ruleOverrideCount ??
+                              0}
+                          </strong>
+                        </span>
+                        <span>
+                          Missing reason{" "}
+                          <strong>
+                            {cliPacketReview.policyReview.metrics
+                              ?.missingOverrideReasonCount ?? 0}
+                          </strong>
+                        </span>
+                        <span>
+                          High-risk allow{" "}
+                          <strong>
+                            {cliPacketReview.policyReview.metrics?.highRiskAllowCount ??
+                              0}
+                          </strong>
+                        </span>
+                      </div>
+                      {cliPacketReview.policyReview.ruleOverrides?.length ? (
+                        <div className="policy-override-list">
+                          {cliPacketReview.policyReview.ruleOverrides.map(
+                            (rule, index) => (
+                              <div key={`${rule.ruleId ?? "override"}_${index}`}>
+                                <span
+                                  className={`policy-review-status policy-review-check-${
+                                    rule.severity === "high" &&
+                                    rule.effectiveAction === "allow"
+                                      ? "warning"
+                                      : "passed"
+                                  }`}
+                                >
+                                  {policyReviewSourceLabel(rule.source)}
+                                </span>
+                                <div>
+                                  <strong>{rule.ruleId ?? "policy rule"}</strong>
+                                  <code>
+                                    {rule.defaultAction ?? "n/a"} -&gt;{" "}
+                                    {rule.effectiveAction ?? "n/a"}
+                                  </code>
+                                  <p>
+                                    {rule.reason ??
+                                      "Rule override is missing rationale."}
+                                  </p>
+                                  {rule.message && <p>{rule.message}</p>}
+                                  {rule.reviewScope?.length ? (
+                                    <small>{rule.reviewScope.join(", ")}</small>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : (
+                        <p className="muted">
+                          No rule-level overrides or effective action changes were
+                          recorded.
+                        </p>
+                      )}
+                      <div className="policy-check-list">
+                        {cliPacketReview.policyReview.checks?.map((check, index) => (
+                          <div key={`${check.name ?? "policy_check"}_${index}`}>
+                            <span
+                              className={`policy-review-status policy-review-check-${check.status ?? "warning"}`}
+                            >
+                              {check.status ?? "warning"}
+                            </span>
+                            <div>
+                              <strong>{check.name ?? "policy check"}</strong>
+                              <p>{check.message ?? "No policy review detail recorded."}</p>
+                              {check.evidence && <code>{check.evidence}</code>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {cliPacketReview.policyReview.limitation && (
+                        <p className="muted">
+                          {cliPacketReview.policyReview.limitation}
+                        </p>
+                      )}
+                    </div>
                   )}
 
                   {cliPacketReview.integrity && (
@@ -2430,6 +2633,7 @@ export default function App() {
                       auditArtifact,
                       integrityArtifact,
                       provenanceArtifact,
+                      policyReviewArtifact,
                       reviewArtifact,
                     ]
                       .filter(Boolean)

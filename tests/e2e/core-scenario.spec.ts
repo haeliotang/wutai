@@ -757,6 +757,9 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Download provenance.json" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download policy-review.json" }),
+  ).toBeVisible();
 
   const importedTask = await page.evaluate(() => {
     const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
@@ -773,11 +776,19 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     "manifest.json",
     "integrity.json",
     "provenance.json",
+    "policy-review.json",
   ]);
   const integrityArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "integrity.json",
   );
   expect(JSON.parse(integrityArtifact.content).status).toBe("passed");
+  const policyReviewArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "policy-review.json",
+  );
+  const policyReview = JSON.parse(policyReviewArtifact.content);
+  expect(policyReview.status).toBe("passed");
+  expect(policyReview.metrics.matchedRuleCount).toBe(1);
+  expect(policyReview.metrics.ruleOverrideCount).toBe(0);
   const provenanceArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "provenance.json",
   );
@@ -1038,7 +1049,14 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
     "attestation.json",
     "integrity.json",
     "provenance.json",
+    "policy-review.json",
   ]);
+  const policyReviewArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "policy-review.json",
+  );
+  const policyReview = JSON.parse(policyReviewArtifact.content);
+  expect(policyReview.status).toBe("passed");
+  expect(policyReview.metrics.matchedRuleCount).toBe(0);
   const provenanceArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "provenance.json",
   );
@@ -1544,7 +1562,15 @@ test("records a dry-run packet review without desktop execution", async ({
     },
   ]);
 
+  const cliReview = page.getByLabel("CLI Packet Review");
   const dryRunReview = page.getByLabel("Dry-run Review");
+  await expect(cliReview.getByRole("heading", { name: "Policy Override Review" })).toBeVisible();
+  const overrideList = cliReview.locator(".policy-override-list");
+  await expect(overrideList.getByText("dependency_install_or_update")).toBeVisible();
+  await expect(overrideList.getByText("warn -> deny")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download policy-review.json" }),
+  ).toBeVisible();
   await expect(dryRunReview).toBeVisible();
   await expect(page.getByText("Permission required")).toHaveCount(0);
   await expect(
@@ -1554,6 +1580,27 @@ test("records a dry-run packet review without desktop execution", async ({
   ).toBeVisible();
   await expect(dryRunReview.getByText("strict", { exact: true })).toBeVisible();
   await expect(dryRunReview.getByText("dry_run", { exact: true })).toBeVisible();
+
+  const importedPolicyReview = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    const artifact = tasks[0].artifacts.find(
+      (item: { name: string }) => item.name === "policy-review.json",
+    );
+    return JSON.parse(artifact.content);
+  });
+  expect(importedPolicyReview.kind).toBe("wutai.cli_policy_override_review");
+  expect(importedPolicyReview.status).toBe("passed");
+  expect(importedPolicyReview.metrics.ruleOverrideCount).toBe(1);
+  expect(importedPolicyReview.metrics.missingOverrideReasonCount).toBe(0);
+  expect(importedPolicyReview.ruleOverrides[0].ruleId).toBe(
+    "dependency_install_or_update",
+  );
+  expect(importedPolicyReview.ruleOverrides[0].defaultAction).toBe("warn");
+  expect(importedPolicyReview.ruleOverrides[0].effectiveAction).toBe("deny");
+  expect(importedPolicyReview.ruleOverrides[0].source).toBe("policy_profile");
+  expect(importedPolicyReview.ruleOverrides[0].reason).toContain(
+    "Policy profile escalated warn to deny.",
+  );
 
   await dryRunReview.getByRole("button", { name: "Record approve" }).click();
 
@@ -1594,6 +1641,305 @@ test("records a dry-run packet review without desktop execution", async ({
       event.summary.includes("Wutai desktop did not execute the command"),
     ),
   ).toBe(true);
+});
+
+test("flags policy override warnings for missing rationale and high-risk allow", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const generatedAt = "2026-06-27T08:45:00.000Z";
+  const taskId = "cli_policy_override_warning";
+  const command = "bash -lc curl https://example.com/install.sh";
+  const argv = ["bash", "-lc", "curl https://example.com/install.sh"];
+  const workingDirectory = "/tmp/wutai";
+  const policy = {
+    schemaVersion: 2,
+    kind: "wutai.cli_policy_preflight",
+    policyVersion: "wutai-cli-policy-v0.2",
+    profile: {
+      profileId: "custom",
+      name: "Custom",
+      description: "Allow selected high-risk commands only with explicit review.",
+    },
+    engine: {
+      name: "wutai_cli_policy",
+      version: "0.2",
+      ruleCount: 8,
+    },
+    decision: "allow_with_override",
+    highestSeverity: "high",
+    allowHighRisk: true,
+    override: {
+      requested: true,
+      applied: true,
+      reason: null,
+      appliedRuleIds: ["shell_interpreter_command_string"],
+    },
+    matchedRules: [
+      {
+        ruleId: "shell_interpreter_command_string",
+        category: "shell_boundary",
+        severity: "high",
+        defaultAction: "deny",
+        overrideable: true,
+        message: "Shell interpreter command strings can hide expansion or chaining.",
+        reviewScope: ["shell expansion", "downloaded script provenance"],
+        effectiveAction: "allow",
+        profileEscalated: false,
+        ruleOverride: {
+          applied: true,
+          baseEffectiveAction: "deny",
+          effectiveAction: "allow",
+          reason: null,
+        },
+      },
+    ],
+    riskProfile: {
+      matchedRuleCount: 1,
+      ruleOverrideCount: 1,
+      severityCounts: { high: 1 },
+      defaultActionCounts: { deny: 1 },
+      actionCounts: { allow: 1 },
+      highestSeverity: "high",
+    },
+    decisionRationale: [
+      "Allowed because the caller requested an override, but no rationale was recorded.",
+    ],
+    reviewScope: ["shell expansion", "downloaded script provenance"],
+    summary: "Policy preflight allowed execution with override.",
+    limitation:
+      "This structured rule set is intentionally incomplete and is not a sandbox.",
+    taskId,
+    generatedAt,
+    command,
+    argv,
+    workingDirectory,
+    executionMode: "execute",
+    dryRun: false,
+  };
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.local_script_trace",
+    taskId,
+    generatedAt,
+    captureMode: "cli_wrapper",
+    command,
+    argv,
+    workingDirectory,
+    dryRun: false,
+    executed: true,
+    startedAt: generatedAt,
+    completedAt: generatedAt,
+    exitCode: 0,
+    stdoutSummary: "No output captured.",
+    stderrSummary: "No output captured.",
+    touchedFiles: [],
+    producedArtifacts: [],
+  };
+  const events = [
+    {
+      eventId: `${taskId}_event_1`,
+      taskId,
+      timestamp: generatedAt,
+      type: "TaskStarted",
+      summary: "Started Wutai CLI wrapper session.",
+      visibility: "user",
+    },
+    {
+      eventId: `${taskId}_event_2`,
+      taskId,
+      timestamp: generatedAt,
+      type: "ToolCallCaptured",
+      summary: `Started command: ${command}`,
+      details: `Working directory: ${workingDirectory}`,
+      visibility: "expert",
+    },
+  ];
+  const ledger = {
+    schemaVersion: 1,
+    kind: "wutai.session_ledger",
+    generatedAt,
+    task: {
+      taskId,
+      title: `CLI run: ${command}`,
+      userRequest: `Run and record local command: ${command}`,
+      status: "completed_with_warnings",
+      plan: ["Run policy preflight.", "Review imported packet."],
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+      events,
+      permissions: [],
+      sources: [],
+      artifacts: [],
+    },
+  };
+  const audit = {
+    schemaVersion: 1,
+    kind: "wutai.session_audit",
+    taskId,
+    generatedAt,
+    permissions: [],
+    policy,
+    events,
+    toolCalls: [
+      {
+        toolCallId: `${taskId}_tool_1`,
+        kind: "local_command",
+        command,
+        argv,
+        workingDirectory,
+        startedAt: generatedAt,
+        completedAt: generatedAt,
+        exitCode: 0,
+        captureMode: "cli_wrapper",
+      },
+    ],
+    runtimeEvents: [
+      {
+        runtimeEventId: `${taskId}_runtime_1`,
+        type: "process_exit",
+        timestamp: generatedAt,
+        exitCode: 0,
+        stdoutSummary: "No output captured.",
+        stderrSummary: "No output captured.",
+      },
+    ],
+    credentialGrants: [],
+  };
+  const reportContent = `# Wutai CLI Run Packet
+
+## Command
+
+\`${command}\`
+
+## Policy Preflight
+
+- Decision: allow_with_override
+- Matched rules: shell_interpreter_command_string
+`;
+  const policyContent = JSON.stringify(policy, null, 2);
+  const traceContent = JSON.stringify(trace, null, 2);
+  const ledgerContent = JSON.stringify(ledger, null, 2);
+  const auditContent = JSON.stringify(audit, null, 2);
+  const manifest = {
+    schemaVersion: 2,
+    kind: "wutai.work_packet_manifest",
+    packetId: `${taskId}_work_packet`,
+    packetType: "local_script",
+    taskId,
+    sessionId: taskId,
+    session: {
+      sessionId: taskId,
+      subject: ledger.task.title,
+      command,
+      workingDirectory,
+      startedAt: generatedAt,
+      completedAt: generatedAt,
+      exitCode: 0,
+      importedTrace: false,
+      executionMode: "execute",
+      dryRun: false,
+    },
+    title: ledger.task.title,
+    status: ledger.task.status,
+    userRequest: ledger.task.userRequest,
+    generatedAt,
+    producer: {
+      name: "wutai",
+      adapter: "wutaiRunCli",
+      runtime: "node child_process spawn",
+    },
+    permissions: [],
+    audit: {
+      eventCount: events.length,
+      eventTypeCounts: { TaskStarted: 1, ToolCallCaptured: 1 },
+      permissionDecisionCount: 0,
+      toolCallCount: 1,
+      runtimeEventCount: 1,
+      credentialPurposes: [],
+      auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
+      policyDecision: "allow_with_override",
+      policyProfile: "custom",
+      executionMode: "execute",
+    },
+    artifacts: [
+      manifestArtifact("report.md", "markdown", reportContent, generatedAt),
+      manifestArtifact("policy.json", "json", policyContent, generatedAt),
+      manifestArtifact("trace.json", "json", traceContent, generatedAt),
+      manifestArtifact("ledger.json", "json", ledgerContent, generatedAt),
+      manifestArtifact("audit.json", "json", auditContent, generatedAt),
+    ],
+    evidence: { status: "not_available", readyForTrust: false },
+    coverage: {
+      captured: ["policy_preflight", "runtime_trace"],
+      blindSpots: ["No process sandbox, filesystem policy, or credential mediation is active."],
+      enforcement: ["CLI wrapper recorded the policy outcome before execution."],
+    },
+    humanReview: { attestation: "not_recorded" },
+  };
+
+  await page.getByLabel("CLI packet files").setInputFiles([
+    {
+      name: "manifest.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(manifest, null, 2)),
+    },
+    {
+      name: "report.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(reportContent),
+    },
+    {
+      name: "policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(policyContent),
+    },
+    {
+      name: "trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(traceContent),
+    },
+    {
+      name: "ledger.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(ledgerContent),
+    },
+    {
+      name: "audit.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(auditContent),
+    },
+  ]);
+
+  const cliReview = page.getByLabel("CLI Packet Review");
+  await expect(cliReview.getByRole("heading", { name: "Policy Override Review" })).toBeVisible();
+  const overrideList = cliReview.locator(".policy-override-list");
+  await expect(
+    overrideList.getByText("shell_interpreter_command_string"),
+  ).toBeVisible();
+  await expect(overrideList.getByText("deny -> allow")).toBeVisible();
+  await expect(
+    cliReview.getByText("Rule override is missing rationale."),
+  ).toBeVisible();
+  await expect(
+    cliReview.getByText("High-risk policy outcome allowed execution after override."),
+  ).toBeVisible();
+
+  const policyReview = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    const artifact = tasks[0].artifacts.find(
+      (item: { name: string }) => item.name === "policy-review.json",
+    );
+    return JSON.parse(artifact.content);
+  });
+  expect(policyReview.status).toBe("warning");
+  expect(policyReview.metrics.ruleOverrideCount).toBe(1);
+  expect(policyReview.metrics.missingOverrideReasonCount).toBe(1);
+  expect(policyReview.metrics.explicitOverrideWithoutReason).toBe(true);
+  expect(policyReview.metrics.highRiskAllowCount).toBe(1);
+  expect(policyReview.ruleOverrides[0].source).toBe("explicit_rule_override");
+  expect(policyReview.ruleOverrides[0].reason).toBeUndefined();
 });
 
 test("imports a CLI wrapper packet directory and flags manifest hash mismatches", async ({

@@ -17,10 +17,12 @@ type CliPacketFile = Pick<File, "name" | "text"> & {
 
 const INTEGRITY_ARTIFACT_NAME = "integrity.json";
 const PROVENANCE_ARTIFACT_NAME = "provenance.json";
+const POLICY_REVIEW_ARTIFACT_NAME = "policy-review.json";
 const ATTESTATION_ARTIFACT_NAME = "attestation.json";
 const INTERNAL_IMPORT_ARTIFACT_NAMES = new Set([
   INTEGRITY_ARTIFACT_NAME,
   PROVENANCE_ARTIFACT_NAME,
+  POLICY_REVIEW_ARTIFACT_NAME,
 ]);
 const REQUIRED_CLI_PACKET_ARTIFACTS = [
   "report.md",
@@ -181,6 +183,103 @@ interface PacketProvenanceArtifact {
   limitation: string;
 }
 
+interface CliPolicyRule {
+  ruleId?: unknown;
+  category?: unknown;
+  severity?: unknown;
+  defaultAction?: unknown;
+  overrideable?: unknown;
+  message?: unknown;
+  reviewScope?: unknown;
+  effectiveAction?: unknown;
+  profileEscalated?: unknown;
+  ruleOverride?: {
+    applied?: unknown;
+    baseEffectiveAction?: unknown;
+    effectiveAction?: unknown;
+    reason?: unknown;
+  };
+}
+
+interface CliPolicyPreflightArtifact {
+  kind?: unknown;
+  taskId?: unknown;
+  decision?: unknown;
+  highestSeverity?: unknown;
+  allowHighRisk?: unknown;
+  profile?: {
+    profileId?: unknown;
+    name?: unknown;
+  };
+  override?: {
+    requested?: unknown;
+    applied?: unknown;
+    reason?: unknown;
+    appliedRuleIds?: unknown;
+  };
+  matchedRules?: unknown;
+  riskProfile?: {
+    matchedRuleCount?: unknown;
+    ruleOverrideCount?: unknown;
+  };
+  summary?: unknown;
+}
+
+interface PolicyReviewCheck {
+  name: string;
+  status: "passed" | "warning" | "failed";
+  message: string;
+  evidence?: string;
+}
+
+interface PolicyRuleOverrideReview {
+  ruleId: string;
+  category?: string;
+  severity?: string;
+  defaultAction?: string;
+  effectiveAction?: string;
+  overrideable?: boolean;
+  profileEscalated: boolean;
+  source: "explicit_rule_override" | "policy_profile" | "effective_action_change";
+  reason?: string;
+  message?: string;
+  reviewScope: string[];
+}
+
+interface PacketPolicyReviewArtifact {
+  schemaVersion: 1;
+  kind: "wutai.cli_policy_override_review";
+  taskId: string;
+  generatedAt: string;
+  status: "passed" | "warning" | "failed";
+  summary: string;
+  policy: {
+    decision?: string;
+    highestSeverity?: string;
+    profileId?: string;
+    profileName?: string;
+    matchedRuleCount: number;
+  };
+  explicitOverride: {
+    requested: boolean;
+    applied: boolean;
+    reason?: string;
+    appliedRuleIds: string[];
+  };
+  ruleOverrides: PolicyRuleOverrideReview[];
+  metrics: {
+    matchedRuleCount: number;
+    ruleOverrideCount: number;
+    missingOverrideReasonCount: number;
+    explicitOverrideWithoutReason: boolean;
+    highRiskAllowCount: number;
+    warnings: number;
+    failed: number;
+  };
+  checks: PolicyReviewCheck[];
+  limitation: string;
+}
+
 function parseJson<T>(content: string, name: string): T {
   try {
     return JSON.parse(content) as T;
@@ -227,6 +326,309 @@ function safeJson(content: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function policyRules(policy: CliPolicyPreflightArtifact): CliPolicyRule[] {
+  return Array.isArray(policy.matchedRules)
+    ? (policy.matchedRules.filter(
+        (rule): rule is CliPolicyRule =>
+          Boolean(rule) && typeof rule === "object" && !Array.isArray(rule),
+      ) as CliPolicyRule[])
+    : [];
+}
+
+function policyDecisionAllows(decision?: string) {
+  return decision === "allow" || decision === "allow_with_override";
+}
+
+function ruleEffectiveAction(rule: CliPolicyRule) {
+  return (
+    optionalString(rule.effectiveAction) ??
+    optionalString(rule.ruleOverride?.effectiveAction)
+  );
+}
+
+function ruleDefaultAction(rule: CliPolicyRule) {
+  return (
+    optionalString(rule.defaultAction) ??
+    optionalString(rule.ruleOverride?.baseEffectiveAction)
+  );
+}
+
+function ruleReviewReason(rule: CliPolicyRule) {
+  const explicitReason = optionalString(rule.ruleOverride?.reason);
+  if (explicitReason) return explicitReason;
+
+  const defaultAction = ruleDefaultAction(rule);
+  const effectiveAction = ruleEffectiveAction(rule);
+  if (rule.profileEscalated === true && defaultAction && effectiveAction) {
+    return `Policy profile escalated ${defaultAction} to ${effectiveAction}.`;
+  }
+  return undefined;
+}
+
+function buildPolicyReviewArtifact(
+  taskId: string,
+  generatedAt: string,
+  contentByName: Map<string, string>,
+): PacketPolicyReviewArtifact {
+  const policyContent = contentByName.get("policy.json");
+  const checks: PolicyReviewCheck[] = [];
+
+  if (!policyContent) {
+    checks.push({
+      name: "policy_json",
+      status: "failed",
+      message: "policy.json was not selected, so rule-level policy review could not run.",
+    });
+    return {
+      schemaVersion: 1,
+      kind: "wutai.cli_policy_override_review",
+      taskId,
+      generatedAt,
+      status: "failed",
+      summary: "Policy override review failed because policy.json is missing.",
+      policy: { matchedRuleCount: 0 },
+      explicitOverride: {
+        requested: false,
+        applied: false,
+        appliedRuleIds: [],
+      },
+      ruleOverrides: [],
+      metrics: {
+        matchedRuleCount: 0,
+        ruleOverrideCount: 0,
+        missingOverrideReasonCount: 0,
+        explicitOverrideWithoutReason: false,
+        highRiskAllowCount: 0,
+        warnings: 0,
+        failed: 1,
+      },
+      checks,
+      limitation:
+        "This review interprets imported policy metadata only. It does not enforce execution, sandbox the command, or verify that the policy engine itself was tamper-resistant.",
+    };
+  }
+
+  const parsed = safeJson(policyContent) as CliPolicyPreflightArtifact | null;
+  if (!parsed) {
+    checks.push({
+      name: "policy_json",
+      status: "failed",
+      message: "policy.json is not a JSON object.",
+    });
+    return {
+      schemaVersion: 1,
+      kind: "wutai.cli_policy_override_review",
+      taskId,
+      generatedAt,
+      status: "failed",
+      summary: "Policy override review failed because policy.json is invalid.",
+      policy: { matchedRuleCount: 0 },
+      explicitOverride: {
+        requested: false,
+        applied: false,
+        appliedRuleIds: [],
+      },
+      ruleOverrides: [],
+      metrics: {
+        matchedRuleCount: 0,
+        ruleOverrideCount: 0,
+        missingOverrideReasonCount: 0,
+        explicitOverrideWithoutReason: false,
+        highRiskAllowCount: 0,
+        warnings: 0,
+        failed: 1,
+      },
+      checks,
+      limitation:
+        "This review interprets imported policy metadata only. It does not enforce execution, sandbox the command, or verify that the policy engine itself was tamper-resistant.",
+    };
+  }
+
+  const kind = optionalString(parsed.kind);
+  checks.push({
+    name: "policy_schema",
+    status: kind === "wutai.cli_policy_preflight" ? "passed" : "failed",
+    message:
+      kind === "wutai.cli_policy_preflight"
+        ? "policy.json matches the Wutai CLI policy preflight contract."
+        : `policy.json kind mismatch: expected wutai.cli_policy_preflight, got ${String(kind ?? "missing")}.`,
+    evidence: `kind=${String(kind ?? "missing")}`,
+  });
+
+  const decision = optionalString(parsed.decision);
+  const highestSeverity = optionalString(parsed.highestSeverity);
+  const rules = policyRules(parsed);
+  const matchedRuleCount =
+    typeof parsed.riskProfile?.matchedRuleCount === "number"
+      ? parsed.riskProfile.matchedRuleCount
+      : rules.length;
+  checks.push({
+    name: "policy_decision",
+    status: decision ? "passed" : "warning",
+    message: decision
+      ? `Policy decision recorded as ${decision}.`
+      : "Policy decision is missing from policy.json.",
+    evidence: `highestSeverity=${String(highestSeverity ?? "missing")}`,
+  });
+
+  const explicitOverride = {
+    requested: parsed.override?.requested === true,
+    applied: parsed.override?.applied === true,
+    reason: optionalString(parsed.override?.reason),
+    appliedRuleIds: stringList(parsed.override?.appliedRuleIds),
+  };
+  const explicitOverrideWithoutReason =
+    explicitOverride.applied && !explicitOverride.reason;
+
+  const ruleOverrides = rules
+    .map((rule, index): PolicyRuleOverrideReview | null => {
+      const defaultAction = ruleDefaultAction(rule);
+      const effectiveAction = ruleEffectiveAction(rule);
+      const explicitRuleOverride = rule.ruleOverride?.applied === true;
+      const profileEscalated = rule.profileEscalated === true;
+      const actionChanged =
+        Boolean(defaultAction) &&
+        Boolean(effectiveAction) &&
+        defaultAction !== effectiveAction;
+
+      if (!explicitRuleOverride && !profileEscalated && !actionChanged) {
+        return null;
+      }
+
+      return {
+        ruleId: optionalString(rule.ruleId) ?? `rule_${index + 1}`,
+        category: optionalString(rule.category),
+        severity: optionalString(rule.severity),
+        defaultAction,
+        effectiveAction,
+        overrideable:
+          typeof rule.overrideable === "boolean" ? rule.overrideable : undefined,
+        profileEscalated,
+        source: explicitRuleOverride
+          ? "explicit_rule_override"
+          : profileEscalated
+            ? "policy_profile"
+            : "effective_action_change",
+        reason: ruleReviewReason(rule),
+        message: optionalString(rule.message),
+        reviewScope: stringList(rule.reviewScope),
+      };
+    })
+    .filter((rule): rule is PolicyRuleOverrideReview => Boolean(rule));
+
+  const missingOverrideReasonCount = rules.filter((rule) => {
+    const explicitRuleOverride = rule.ruleOverride?.applied === true;
+    const defaultAction = ruleDefaultAction(rule);
+    const effectiveAction = ruleEffectiveAction(rule);
+    const actionChanged =
+      Boolean(defaultAction) &&
+      Boolean(effectiveAction) &&
+      defaultAction !== effectiveAction;
+    return (
+      (explicitRuleOverride || (actionChanged && rule.profileEscalated !== true)) &&
+      !ruleReviewReason(rule)
+    );
+  }).length;
+
+  const highRiskRuleAllowCount = rules.filter((rule) => {
+    const severity = optionalString(rule.severity);
+    const defaultAction = ruleDefaultAction(rule);
+    const effectiveAction = ruleEffectiveAction(rule);
+    return (
+      severity === "high" &&
+      (effectiveAction === "allow" ||
+        (defaultAction === "deny" && effectiveAction === "allow"))
+    );
+  }).length;
+  const highRiskAllowCount =
+    highRiskRuleAllowCount +
+    (highRiskRuleAllowCount === 0 &&
+    highestSeverity === "high" &&
+    policyDecisionAllows(decision)
+      ? 1
+      : 0);
+
+  checks.push({
+    name: "rule_action_changes",
+    status: "passed",
+    message: ruleOverrides.length
+      ? `Recorded ${ruleOverrides.length} rule-level default/effective action change.`
+      : "No rule-level overrides or effective action changes were recorded.",
+    evidence: `matchedRules=${matchedRuleCount}`,
+  });
+  checks.push({
+    name: "override_rationale",
+    status:
+      missingOverrideReasonCount > 0 || explicitOverrideWithoutReason
+        ? "warning"
+        : "passed",
+    message:
+      missingOverrideReasonCount > 0 || explicitOverrideWithoutReason
+        ? "One or more policy overrides are missing rationale."
+        : "Policy override rationale is present when required.",
+    evidence: `missingRuleReasons=${missingOverrideReasonCount} explicitOverrideWithoutReason=${String(explicitOverrideWithoutReason)}`,
+  });
+  checks.push({
+    name: "high_risk_allow",
+    status: highRiskAllowCount > 0 ? "warning" : "passed",
+    message:
+      highRiskAllowCount > 0
+        ? "High-risk policy outcome allowed execution after override."
+        : "No high-risk allow outcome was recorded.",
+    evidence: `highRiskAllowCount=${highRiskAllowCount}`,
+  });
+
+  const failed = checks.filter((check) => check.status === "failed").length;
+  const warnings = checks.filter((check) => check.status === "warning").length;
+  const status =
+    failed > 0 ? "failed" : warnings > 0 ? "warning" : "passed";
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.cli_policy_override_review",
+    taskId,
+    generatedAt,
+    status,
+    summary:
+      status === "failed"
+        ? "Policy override review failed because the imported policy contract is invalid."
+        : status === "warning"
+          ? `Policy override review found ${warnings} warning across ${ruleOverrides.length} rule-level action change.`
+          : `Policy override review passed with ${ruleOverrides.length} rule-level action change recorded.`,
+    policy: {
+      decision,
+      highestSeverity,
+      profileId: optionalString(parsed.profile?.profileId),
+      profileName: optionalString(parsed.profile?.name),
+      matchedRuleCount,
+    },
+    explicitOverride,
+    ruleOverrides,
+    metrics: {
+      matchedRuleCount,
+      ruleOverrideCount: ruleOverrides.length,
+      missingOverrideReasonCount,
+      explicitOverrideWithoutReason,
+      highRiskAllowCount,
+      warnings,
+      failed,
+    },
+    checks,
+    limitation:
+      "This review interprets imported policy metadata only. It does not enforce execution, sandbox the command, or verify that the policy engine itself was tamper-resistant.",
+  };
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -734,6 +1136,11 @@ export async function importCliPacketFiles(
     importMode,
     trustedProducerPolicy,
   );
+  const policyReview = buildPolicyReviewArtifact(
+    taskId,
+    new Date().toISOString(),
+    contentByName,
+  );
   const orderedNames = [
     ...(manifest.artifacts?.map((artifact) => artifact.name) ?? []),
     "manifest.json",
@@ -779,7 +1186,16 @@ export async function importCliPacketFiles(
     content: JSON.stringify(provenance, null, 2),
     createdAt: provenance.generatedAt,
   };
-  const allArtifacts = [...artifacts, provenanceArtifact];
+  const policyReviewArtifact: ArtifactRecord = {
+    artifactId: `${taskId}_artifact_policy_review_json`,
+    taskId,
+    type: "json",
+    name: POLICY_REVIEW_ARTIFACT_NAME,
+    virtualPath: `imported/${taskId}/${POLICY_REVIEW_ARTIFACT_NAME}`,
+    content: JSON.stringify(policyReview, null, 2),
+    createdAt: policyReview.generatedAt,
+  };
+  const allArtifacts = [...artifacts, provenanceArtifact, policyReviewArtifact];
   const importedEvent = event(
     taskId,
     1,
@@ -791,8 +1207,8 @@ export async function importCliPacketFiles(
     taskId,
     2,
     generatedAt,
-    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes and provenance.`,
-    `${integrity.summary} ${provenance.summary}`,
+    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes, provenance, and policy overrides.`,
+    `${integrity.summary} ${provenance.summary} ${policyReview.summary}`,
   );
 
   return {
@@ -809,6 +1225,7 @@ export async function importCliPacketFiles(
         : [
             "Import the CLI wrapper work packet.",
             "Check selected artifacts against manifest hashes and packet provenance.",
+            "Review rule-level policy overrides and effective action changes.",
             "Review policy, trace, ledger, audit, manifest, and integrity artifacts.",
             "Keep this as a review-only desktop record.",
           ],

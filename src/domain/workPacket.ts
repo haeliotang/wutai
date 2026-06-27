@@ -195,6 +195,7 @@ function artifactRole(name: string) {
   if (name === "claims.json") return "claim_ledger";
   if (name === "verification.json") return "evidence_verification";
   if (name === "policy.json") return "policy_preflight";
+  if (name === "policy-review.json") return "policy_override_review";
   if (name === "trace.json") return "runtime_trace";
   if (name === "files.json") return "file_inventory";
   if (name === "file-check.json") return "file_hash_check";
