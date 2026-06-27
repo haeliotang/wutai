@@ -5,6 +5,11 @@ import type {
   TaskStatus,
   WutaiTask,
 } from "../domain/task";
+import {
+  EMPTY_TRUSTED_PRODUCER_POLICY,
+  evaluateTrustedProducerKey,
+  type TrustedProducerPolicy,
+} from "./trustedProducerPolicy";
 
 type CliPacketFile = Pick<File, "name" | "text"> & {
   webkitRelativePath?: string;
@@ -155,6 +160,16 @@ interface PacketProvenanceArtifact {
     trustedKey: boolean;
     algorithm?: string;
     publicKeySha256?: string;
+  };
+  trustPolicy: {
+    provided: boolean;
+    policyId?: string;
+    sourceLabel?: string;
+    keyCount: number;
+    status: string;
+    matchedKeyId?: string;
+    matchedLabel?: string;
+    message: string;
   };
   metrics: {
     total: number;
@@ -383,6 +398,7 @@ async function buildProvenanceArtifact(
   manifestContent: string,
   contentByName: Map<string, string>,
   importMode: "directory" | "files",
+  trustedProducerPolicy: TrustedProducerPolicy,
 ): Promise<PacketProvenanceArtifact> {
   const manifestSha256 = await sha256Hex(manifestContent);
   const manifestBytes = byteLength(manifestContent);
@@ -390,6 +406,14 @@ async function buildProvenanceArtifact(
     present: false,
     verified: false,
     trustedKey: false,
+  };
+  let trustPolicy: PacketProvenanceArtifact["trustPolicy"] = {
+    provided: trustedProducerPolicy.keys.length > 0,
+    policyId: trustedProducerPolicy.policyId,
+    sourceLabel: trustedProducerPolicy.sourceLabel,
+    keyCount: trustedProducerPolicy.keys.length,
+    status: "not_evaluated",
+    message: "No verified attestation was available for trusted-key evaluation.",
   };
   const checks: ProvenanceCheck[] = [
     {
@@ -552,11 +576,30 @@ async function buildProvenanceArtifact(
         evidence: `algorithm=${String(algorithm ?? "missing")}`,
       });
       if (signatureResult.verified) {
+        const trustResult = evaluateTrustedProducerKey(trustedProducerPolicy, {
+          publicKeySha256: claimedPublicKeySha256,
+          producerAdapter: manifest.producer?.adapter,
+          packetType: manifest.packetType,
+        });
+        attestation.trustedKey = trustResult.trusted;
+        trustPolicy = {
+          provided: trustedProducerPolicy.keys.length > 0,
+          policyId: trustedProducerPolicy.policyId,
+          sourceLabel: trustedProducerPolicy.sourceLabel,
+          keyCount: trustedProducerPolicy.keys.length,
+          status: trustResult.status,
+          matchedKeyId: trustResult.key?.keyId,
+          matchedLabel: trustResult.key?.label,
+          message: trustResult.message,
+        };
         checks.push({
           name: "trusted_key",
-          status: "warning",
-          message:
-            "The attestation signature is valid, but Wutai has no trusted-key registry for producer identity yet.",
+          status: trustResult.trusted
+            ? "passed"
+            : trustResult.status === "revoked"
+              ? "failed"
+              : "warning",
+          message: trustResult.message,
           evidence: `publicKeySha256=${String(claimedPublicKeySha256 ?? "missing")}`,
         });
       }
@@ -582,6 +625,8 @@ async function buildProvenanceArtifact(
     summary:
       status === "failed"
         ? `Packet provenance check found ${metrics.failed} failed check and ${metrics.warnings} warning.`
+        : status === "passed" && attestation.verified && attestation.trustedKey
+          ? "Packet attestation signature verified and trusted producer key matched."
         : status === "warning" && attestation.verified
           ? `Packet attestation signature verified with ${metrics.warnings} trust warning; producer identity is not trusted.`
           : status === "warning"
@@ -602,6 +647,7 @@ async function buildProvenanceArtifact(
       producerRuntime: manifest.producer?.runtime,
     },
     attestation,
+    trustPolicy,
     metrics,
     checks,
     limitation:
@@ -627,7 +673,10 @@ function event(
   };
 }
 
-export async function importCliPacketFiles(files: CliPacketFile[]): Promise<WutaiTask> {
+export async function importCliPacketFiles(
+  files: CliPacketFile[],
+  trustedProducerPolicy: TrustedProducerPolicy = EMPTY_TRUSTED_PRODUCER_POLICY,
+): Promise<WutaiTask> {
   const duplicateNames = files
     .map((file) => file.name)
     .filter((name, index, names) => names.indexOf(name) !== index);
@@ -683,6 +732,7 @@ export async function importCliPacketFiles(files: CliPacketFile[]): Promise<Wuta
     manifestContent,
     contentByName,
     importMode,
+    trustedProducerPolicy,
   );
   const orderedNames = [
     ...(manifest.artifacts?.map((artifact) => artifact.name) ?? []),

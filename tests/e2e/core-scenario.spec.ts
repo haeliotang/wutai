@@ -606,13 +606,14 @@ test("imports a signed CLI wrapper packet and records untrusted attestation", as
     humanReview: { attestation: "not_recorded" },
   };
   const manifestContent = JSON.stringify(manifest, null, 2);
-  const attestationContent = JSON.stringify(
-    signedAttestation(taskId, generatedAt, manifest, manifestContent),
-    null,
-    2,
+  const attestation = signedAttestation(
+    taskId,
+    generatedAt,
+    manifest,
+    manifestContent,
   );
-
-  await page.getByLabel("CLI packet files").setInputFiles([
+  const attestationContent = JSON.stringify(attestation, null, 2);
+  const packetFiles = [
     {
       name: "manifest.json",
       mimeType: "application/json",
@@ -648,7 +649,9 @@ test("imports a signed CLI wrapper packet and records untrusted attestation", as
       mimeType: "application/json",
       buffer: Buffer.from(auditContent),
     },
-  ]);
+  ];
+
+  await page.getByLabel("CLI packet files").setInputFiles(packetFiles);
 
   const cliReview = page.getByLabel("CLI Packet Review");
   await expect(cliReview).toBeVisible();
@@ -697,6 +700,62 @@ test("imports a signed CLI wrapper packet and records untrusted attestation", as
     provenance.checks.find((check: { name: string }) => check.name === "trusted_key")
       .status,
   ).toBe("warning");
+
+  const trustedProducerPolicy = {
+    schemaVersion: 1,
+    kind: "wutai.trusted_producer_policy",
+    policyId: "e2e-fixture-policy",
+    keys: [
+      {
+        keyId: "fixture-signing-key",
+        label: "Fixture signing key",
+        publicKeySha256: attestation.signature.publicKeySha256,
+        producerAdapter: "wutaiRunCli",
+        allowedPacketTypes: ["local_script"],
+        status: "active",
+      },
+    ],
+  };
+  await page.getByLabel("Trusted producer policy").setInputFiles([
+    {
+      name: "trusted-producers.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(trustedProducerPolicy, null, 2)),
+    },
+  ]);
+  await expect(
+    page.getByText("Trusted producer policy loaded: 1 key."),
+  ).toBeVisible();
+
+  await page.getByLabel("CLI packet files").setInputFiles(packetFiles);
+  await expect(
+    cliReview.getByText(
+      "Packet attestation signature verified and trusted producer key matched.",
+    ),
+  ).toBeVisible();
+  await expect(
+    cliReview.getByText("Trust Key Fixture signing key", { exact: true }),
+  ).toBeVisible();
+
+  const trustedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const trustedProvenanceArtifact = trustedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const trustedProvenance = JSON.parse(trustedProvenanceArtifact.content);
+  expect(trustedProvenance.status).toBe("passed");
+  expect(trustedProvenance.metrics.warnings).toBe(0);
+  expect(trustedProvenance.metrics.failed).toBe(0);
+  expect(trustedProvenance.attestation.trustedKey).toBe(true);
+  expect(trustedProvenance.trustPolicy.status).toBe("trusted");
+  expect(trustedProvenance.trustPolicy.matchedKeyId).toBe("fixture-signing-key");
+  expect(
+    trustedProvenance.checks.find(
+      (check: { name: string }) => check.name === "trusted_key",
+    ).status,
+  ).toBe("passed");
 });
 
 test("records a dry-run packet review without desktop execution", async ({

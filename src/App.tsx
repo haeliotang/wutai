@@ -21,11 +21,17 @@ import {
 import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
 import { importCliPacketFiles } from "./runtime/cliPacketImporter";
 import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
+import {
+  EMPTY_TRUSTED_PRODUCER_POLICY,
+  parseTrustedProducerPolicy,
+  type TrustedProducerPolicy,
+} from "./runtime/trustedProducerPolicy";
 import { createTaskStore } from "./storage/createTaskStore";
 import type { TaskStore } from "./storage/taskStore";
 
 const CORE_SCENARIO =
   "Research agent work governance tools and produce a short market comparison report.";
+const TRUSTED_PRODUCER_POLICY_STORAGE_KEY = "wutai.v0.trustedProducerPolicy";
 
 interface CliPolicyArtifact {
   decision?: string;
@@ -107,6 +113,16 @@ interface CliProvenanceArtifact {
     trustedKey?: boolean;
     algorithm?: string;
     publicKeySha256?: string;
+  };
+  trustPolicy?: {
+    provided?: boolean;
+    policyId?: string;
+    sourceLabel?: string;
+    keyCount?: number;
+    status?: string;
+    matchedKeyId?: string;
+    matchedLabel?: string;
+    message?: string;
   };
   metrics?: {
     total?: number;
@@ -348,10 +364,15 @@ export default function App() {
     null,
   );
   const [providerSetupSaving, setProviderSetupSaving] = useState(false);
+  const [trustedProducerPolicy, setTrustedProducerPolicy] =
+    useState<TrustedProducerPolicy>(EMPTY_TRUSTED_PRODUCER_POLICY);
+  const [trustedProducerPolicyMessage, setTrustedProducerPolicyMessage] =
+    useState<string | null>(null);
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
   const abortRef = useRef<AbortController | null>(null);
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
   const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
+  const trustedProducerPolicyInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -393,6 +414,27 @@ export default function App() {
 
     input.setAttribute("webkitdirectory", "");
     input.setAttribute("directory", "");
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(
+        TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
+      );
+      if (!saved) return;
+      const policy = parseTrustedProducerPolicy(saved, "localStorage");
+      setTrustedProducerPolicy(policy);
+      setTrustedProducerPolicyMessage(
+        `Trusted producer policy loaded: ${policy.keys.length} key${policy.keys.length === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      setTrustedProducerPolicy(EMPTY_TRUSTED_PRODUCER_POLICY);
+      setTrustedProducerPolicyMessage(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not load the trusted producer policy.",
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -769,12 +811,49 @@ export default function App() {
     await persist(task);
   }
 
+  async function loadTrustedProducerPolicy(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+
+    try {
+      const policy = parseTrustedProducerPolicy(await file.text(), file.name);
+      window.localStorage.setItem(
+        TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
+        JSON.stringify(policy, null, 2),
+      );
+      setTrustedProducerPolicy(policy);
+      setTrustedProducerPolicyMessage(
+        `Trusted producer policy loaded: ${policy.keys.length} key${policy.keys.length === 1 ? "" : "s"}.`,
+      );
+      setError(null);
+    } catch (error) {
+      setTrustedProducerPolicyMessage(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not load the trusted producer policy.",
+      );
+    } finally {
+      if (trustedProducerPolicyInputRef.current) {
+        trustedProducerPolicyInputRef.current.value = "";
+      }
+    }
+  }
+
+  function clearTrustedProducerPolicy() {
+    window.localStorage.removeItem(TRUSTED_PRODUCER_POLICY_STORAGE_KEY);
+    setTrustedProducerPolicy(EMPTY_TRUSTED_PRODUCER_POLICY);
+    setTrustedProducerPolicyMessage("Trusted producer policy cleared.");
+  }
+
   async function importCliPacketFromFiles(files: FileList | null) {
     if (!taskStore || !files || files.length === 0) return;
 
     setError(null);
     try {
-      const task = await importCliPacketFiles(Array.from(files));
+      const task = await importCliPacketFiles(
+        Array.from(files),
+        trustedProducerPolicy,
+      );
       await persist(task);
     } catch (error) {
       setError(
@@ -1067,6 +1146,19 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => trustedProducerPolicyInputRef.current?.click()}
+            >
+              Load trust policy
+            </button>
+            <button
+              type="button"
+              onClick={clearTrustedProducerPolicy}
+              disabled={trustedProducerPolicy.keys.length === 0}
+            >
+              Clear trust policy
+            </button>
+            <button
+              type="button"
               onClick={stopTask}
               disabled={activeTask?.status !== "running"}
             >
@@ -1089,6 +1181,28 @@ export default function App() {
               multiple
               onChange={(event) => void importCliPacketFromFiles(event.target.files)}
             />
+            <input
+              ref={trustedProducerPolicyInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="Trusted producer policy"
+              accept=".json"
+              onChange={(event) => void loadTrustedProducerPolicy(event.target.files)}
+            />
+          </div>
+          <div className="trust-policy-status" aria-label="Trust policy status">
+            <span>
+              Trust policy:{" "}
+              <strong>
+                {trustedProducerPolicy.keys.length
+                  ? trustedProducerPolicy.policyId
+                  : "none"}
+              </strong>
+            </span>
+            <span>{trustedProducerPolicy.keys.length} trusted keys</span>
+            {trustedProducerPolicyMessage && (
+              <span>{trustedProducerPolicyMessage}</span>
+            )}
           </div>
           {error && <p className="error-text">{error}</p>}
 
@@ -1767,6 +1881,16 @@ export default function App() {
                               : cliPacketReview.provenance.attestation?.present
                                 ? "failed"
                                 : "missing"}
+                          </strong>
+                        </span>
+                        <span>
+                          Trust Key{" "}
+                          <strong>
+                            {cliPacketReview.provenance.attestation?.trustedKey
+                              ? (cliPacketReview.provenance.trustPolicy?.matchedLabel ??
+                                "trusted")
+                              : (cliPacketReview.provenance.trustPolicy?.status ??
+                                "untrusted")}
                           </strong>
                         </span>
                         <span>

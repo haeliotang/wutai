@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.trusted_producer_policy",
+  "policyId": "local-trusted-producers",
+  "keys": [
+    {
+      "keyId": "example-wutai-cli-key",
+      "label": "Example Wutai CLI signing key",
+      "publicKeySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "producerAdapter": "wutaiRunCli",
+      "allowedPacketTypes": ["local_script"],
+      "status": "active",
+      "note": "Example placeholder hash. Replace it with the real public key hash. Do not store private keys in this policy file."
+    }
+  ]
+}

@@ -222,6 +222,19 @@ select:focus {
   margin-top: 14px;
 }
 
+.trust-policy-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
+.trust-policy-status strong {
+  color: #f4f1e8;
+}
+
 .primary-action {
   border-color: #95e884;
   color: #061005;
@@ -660,7 +673,7 @@ select:focus {
 
 .provenance-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
 }
 

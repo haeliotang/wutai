@@ -113,8 +113,8 @@ and create a work packet. Its current boundary is structured but incomplete:
 - The desktop/web import path writes `provenance.json` for manifest hash,
   producer fields, required artifact presence, schema-kind consistency, and
   optional signature/attestation verification. Missing signatures remain a
-  warning. Valid signatures remain untrusted until a trusted-key registry or
-  producer policy exists.
+  warning. Valid signatures remain untrusted unless the public key hash matches
+  a local trusted-producer policy explicitly loaded by the user.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
 - It does not identify every destructive command.
@@ -122,6 +122,8 @@ and create a work packet. Its current boundary is structured but incomplete:
   or credentials inherited from the invoking shell.
 - It does not protect the signing key or prove the private-key holder is a
   trusted Wutai producer.
+- It does not implement certificate-chain validation, remote revocation checks,
+  system keychain-backed trust storage, or automatic key enrollment.
 - It does not replace the future desktop permission broker.
 
 Any product surface that exposes command execution to non-developer users must
