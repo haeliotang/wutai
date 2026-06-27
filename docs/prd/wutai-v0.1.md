@@ -255,7 +255,7 @@ contracts.
 | Research runtime | GPT Researcher sidecar with setup preflight | Mature open-source deep research agent; Apache-2.0. Wutai owns the task UX, setup explanation, and permission model, not the research engine. |
 | Browser automation | Not required in v0.1 core path | Add later through browser-use if the research workflow needs direct browser control. |
 | Coding/local execution | Not required in v0.1 | Add later through Codex app-server adapter. |
-| External trace import / CLI wrapper | Local-script trace import, developer CLI wrapper with structured policy preflight, external profile config, rule-level policy overrides, dry-run review packets, optional signed packet attestation, local trusted-producer policy matching, UI packet review, manifest hash check, packet provenance check, and filtered audit detail browsing in v0.2 foundation | Extend later to Claude Code, Codex, or other agent traces after the work-packet schema is stable. |
+| External trace import / CLI wrapper | Local-script trace import, coding-agent trace import, developer CLI wrapper with structured policy preflight, external profile config, rule-level policy overrides, dry-run review packets, optional signed packet attestation, local trusted-producer policy matching, UI packet review, manifest hash check, packet provenance check, and filtered audit detail browsing in v0.2 foundation | Extend later to live Claude Code, Codex, MCP, or browser agents after the work-packet schema is stable. |
 | Computer use | Not required in v0.1 | Add later through CUA or Agent-S after stronger safety controls. |
 
 See [Adapter Shortlist](../research/adapter-shortlist-v0.1.md).
@@ -423,7 +423,7 @@ The v0.1 core scenario is complete when:
 v0.2 candidates:
 
 - Work-packet manifest hardening for sessions beyond research, imported local-script traces, and developer CLI wrapper runs.
-- Trusted-key enrollment hardening, rule override hardening, or coding-agent trace importer for one external workflow.
+- Trusted-key enrollment hardening, rule override hardening, MCP tool-call recorder, or local file ingestion.
 - Local file ingestion for user-selected files.
 - PDF export.
 

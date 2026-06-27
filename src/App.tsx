@@ -19,6 +19,10 @@ import {
   type SearchProvider,
 } from "./runtime/researchProviderSetup";
 import type { ResearchAdapter, ResearchPreflight } from "./runtime/researchAdapter";
+import {
+  importCodingAgentTrace,
+  parseCodingAgentTrace,
+} from "./runtime/codingAgentTraceImporter";
 import { importCliPacketFiles } from "./runtime/cliPacketImporter";
 import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
 import {
@@ -372,6 +376,7 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
   const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
+  const codingAgentTraceInputRef = useRef<HTMLInputElement | null>(null);
   const trustedProducerPolicyInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -811,6 +816,28 @@ export default function App() {
     await persist(task);
   }
 
+  async function importCodingAgentTraceTask(files: FileList | null) {
+    const file = files?.[0];
+    if (!taskStore || !artifactWriter || !file) return;
+
+    setError(null);
+    try {
+      const trace = parseCodingAgentTrace(await file.text());
+      const task = await importCodingAgentTrace(artifactWriter, trace);
+      await persist(task);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not import the coding-agent trace.",
+      );
+    } finally {
+      if (codingAgentTraceInputRef.current) {
+        codingAgentTraceInputRef.current.value = "";
+      }
+    }
+  }
+
   async function loadTrustedProducerPolicy(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
@@ -1134,6 +1161,12 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => codingAgentTraceInputRef.current?.click()}
+            >
+              Import coding agent trace
+            </button>
+            <button
+              type="button"
               onClick={() => cliPacketInputRef.current?.click()}
             >
               Import CLI packet files
@@ -1172,6 +1205,14 @@ export default function App() {
               accept=".json,.md"
               multiple
               onChange={(event) => void importCliPacketFromFiles(event.target.files)}
+            />
+            <input
+              ref={codingAgentTraceInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="Coding agent trace"
+              accept=".json"
+              onChange={(event) => void importCodingAgentTraceTask(event.target.files)}
             />
             <input
               ref={cliPacketDirectoryInputRef}

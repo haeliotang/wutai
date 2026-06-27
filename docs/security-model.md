@@ -134,6 +134,21 @@ Any product surface that exposes command execution to non-developer users must
 add explicit policy preflight, confirmation, stop/revoke behavior, and clearer
 filesystem and credential boundaries first.
 
+## Coding-Agent Trace Import Boundary
+
+The coding-agent trace importer accepts a declared `wutai.coding_agent_trace`
+JSON file and converts it into a local `coding_agent` work packet.
+
+- It records declared tool calls, file changes, credential purposes, runtime
+  summary, audit trail, and artifact hashes.
+- It does not execute, replay, approve, or block the external coding agent.
+- It does not prove the imported trace is complete or authentic.
+- It does not capture file diffs or contents unless the trace declares them.
+- It does not mediate credentials, filesystem access, network access, or tool
+  permissions for the external agent session.
+
+Use this as post-hoc review evidence only. It is not live supervision.
+
 ## Credential Boundary
 
 Agents should not receive broad permanent credentials by default. Wutai should:

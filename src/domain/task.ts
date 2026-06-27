@@ -14,6 +14,7 @@ export type PermissionType =
   | "public_webpage_read"
   | "artifact_write"
   | "local_script_trace_import"
+  | "coding_agent_trace_import"
   | "local_script_execution";
 
 export type PermissionStatus = "pending" | "approved" | "denied";

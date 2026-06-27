@@ -10,10 +10,11 @@ auditable, stoppable, and reviewable.
 
 > Repository status: v0.2 foundation in progress. The current code implements
 > one supervised research workflow, a v0.2 work-packet manifest, and a
-> local-script trace-import and developer CLI wrapper wedge. It does not yet
+> local-script trace-import, coding-agent trace-import, and developer CLI
+> wrapper wedge. It does not yet
 > sandbox commands, enforce a general permission broker, or supervise arbitrary
-> external agents, browser-control runtimes, MCP tools, coding agents, or full
-> computer-use sessions.
+> external agents, browser-control runtimes, MCP tools, live coding agents, or
+> full computer-use sessions.
 
 ## Why This Exists
 
@@ -36,8 +37,8 @@ that records, scopes, and verifies agentic work.
 ## Current Implementation
 
 The v0.1 scaffold proves this loop with a bounded research workflow. The v0.2
-foundation extends the work-packet model with local-script trace import and a
-developer CLI wrapper:
+foundation extends the work-packet model with local-script trace import,
+coding-agent trace import, and a developer CLI wrapper:
 
 ```text
 natural-language task
@@ -68,6 +69,9 @@ Implemented:
   coverage/blind-spot notes.
 - Local-script trace importer that turns an already-run command trace into a
   reviewable work packet without executing the command.
+- Coding-agent trace importer that turns an already-run external coding-agent
+  session trace into a reviewable `coding_agent` work packet without executing
+  the agent, approving tool calls, or supervising filesystem access.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs structured policy preflight from `config/wutai-cli-policy-profiles.json`,
@@ -96,6 +100,15 @@ audit.json
 ```
 
 Each imported local-script trace writes:
+
+```text
+manifest.json
+report.md
+trace.json
+audit.json
+```
+
+Each imported coding-agent trace writes:
 
 ```text
 manifest.json
@@ -393,8 +406,8 @@ direction:
   true.
 - External runtimes that cannot enforce Wutai's permission boundary must remain
   experimental and out of the default path.
-- Do not claim support for browser-use, Codex, Claude Code, MCP proxying, or
-  full computer-use supervision until there is code, configuration, and a
+- Do not claim live support for browser-use, Codex, Claude Code, MCP proxying,
+  or full computer-use supervision until there is code, configuration, and a
   runnable verification path in this repository.
 
 ## Roadmap
@@ -407,6 +420,8 @@ Near-term engineering work:
 - Harden trusted-key enrollment and producer trust policy for signed CLI packets.
 - Add more regression coverage and validation for externally configurable rule
   overrides.
+- Add MCP tool-call recorder or local file ingestion after the imported trace
+  contracts are stable.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

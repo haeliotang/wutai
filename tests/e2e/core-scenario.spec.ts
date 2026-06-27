@@ -185,6 +185,109 @@ test("imports a local script trace as a v0.2 work packet", async ({ page }) => {
   );
 });
 
+test("imports a coding-agent trace as a v0.2 work packet", async ({ page }) => {
+  await page.goto("/");
+
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.coding_agent_trace",
+    agentName: "Codex",
+    agentRuntime: "codex-cli declared fixture",
+    sessionId: "codex_fixture_session",
+    title: "Implement packet provenance checks",
+    userRequest:
+      "Add packet provenance checks and update tests without executing inside Wutai.",
+    repository: "/tmp/wutai",
+    startedAt: "2026-06-27T08:00:00.000Z",
+    completedAt: "2026-06-27T08:03:00.000Z",
+    status: "completed",
+    summary: "Imported session declared one shell command and one source edit.",
+    toolCalls: [
+      {
+        toolCallId: "tool_1",
+        kind: "shell_command",
+        command: "npm run test:e2e",
+        summary: "Ran browser regression tests.",
+        exitCode: 0,
+        status: "completed",
+      },
+      {
+        toolCallId: "tool_2",
+        kind: "file_edit",
+        path: "src/runtime/cliPacketImporter.ts",
+        action: "modified",
+        summary: "Added provenance checks.",
+        status: "completed",
+      },
+    ],
+    fileChanges: [
+      {
+        path: "src/runtime/cliPacketImporter.ts",
+        action: "modified",
+        summary: "Added packet provenance checks.",
+      },
+      {
+        path: "tests/e2e/core-scenario.spec.ts",
+        action: "modified",
+        summary: "Covered imported packet review.",
+      },
+    ],
+    producedArtifacts: ["provenance.json"],
+    credentialPurposes: ["none_declared"],
+    limitations: [
+      "Fixture does not include full stdout, stderr, or source diffs.",
+    ],
+  };
+
+  await page.getByLabel("Coding agent trace").setInputFiles([
+    {
+      name: "codex-trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(trace, null, 2)),
+    },
+  ]);
+
+  await expect(page.getByText("Coding-agent trace imported.")).toBeVisible();
+  await expect(page.getByText("# Coding Agent Trace Import")).toBeVisible();
+  await expect(
+    page.getByText("Imported session declared one shell command and one source edit."),
+  ).toBeVisible();
+
+  const importedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const manifestArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "manifest.json",
+  );
+  const traceArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trace.json",
+  );
+  const auditArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "audit.json",
+  );
+  const manifest = JSON.parse(manifestArtifact.content);
+  const importedTrace = JSON.parse(traceArtifact.content);
+  const audit = JSON.parse(auditArtifact.content);
+
+  expect(importedTask.status).toBe("completed");
+  expect(manifest.packetType).toBe("coding_agent");
+  expect(manifest.producer.adapter).toBe("codingAgentTraceImporter");
+  expect(manifest.session.importedTrace).toBe(true);
+  expect(manifest.session.workingDirectory).toBe("/tmp/wutai");
+  expect(manifest.audit.toolCallCount).toBe(2);
+  expect(manifest.audit.runtimeEventCount).toBe(1);
+  expect(manifest.audit.credentialPurposes).toEqual(["none_declared"]);
+  expect(manifest.coverage.enforcement).toContain(
+    "Trace import records the boundary after execution; it does not supervise the coding agent.",
+  );
+  expect(importedTrace.kind).toBe("wutai.coding_agent_trace");
+  expect(importedTrace.toolCalls).toHaveLength(2);
+  expect(audit.toolCalls).toHaveLength(2);
+  expect(audit.fileChanges).toHaveLength(2);
+  expect(audit.credentialGrants[0].purpose).toBe("none_declared");
+});
+
 test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   await page.goto("/");
 
