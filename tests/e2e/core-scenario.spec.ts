@@ -288,6 +288,161 @@ test("imports a coding-agent trace as a v0.2 work packet", async ({ page }) => {
   expect(audit.credentialGrants[0].purpose).toBe("none_declared");
 });
 
+test("imports an MCP tool-call trace as a v0.2 work packet", async ({ page }) => {
+  await page.goto("/");
+
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.mcp_tool_call_trace",
+    clientName: "local-agent-fixture",
+    serverName: "filesystem-mcp",
+    sessionId: "mcp_fixture_session",
+    title: "Read repository metadata",
+    userRequest:
+      "Record MCP tool calls from an already-run local agent session.",
+    startedAt: "2026-06-27T09:00:00.000Z",
+    completedAt: "2026-06-27T09:01:00.000Z",
+    status: "completed",
+    summary: "Imported MCP session declared two tool calls.",
+    toolCalls: [
+      {
+        toolCallId: "mcp_tool_1",
+        toolName: "list_directory",
+        requestSummary: "Listed the docs directory.",
+        argumentsPreview: '{"path":"docs"}',
+        resultSummary: "Returned architecture and development docs.",
+        latencyMs: 42,
+        status: "completed",
+      },
+      {
+        toolCallId: "mcp_tool_2",
+        serverName: "git-mcp",
+        toolName: "git_status",
+        requestSummary: "Checked worktree status.",
+        resultSummary: "No uncommitted changes.",
+        latencyMs: 18,
+        status: "completed",
+      },
+    ],
+    resources: ["docs/architecture.md", "git status"],
+    credentialPurposes: ["none_declared"],
+    limitations: ["Fixture does not include full MCP request or response bodies."],
+  };
+
+  await page.getByLabel("MCP tool-call trace").setInputFiles([
+    {
+      name: "mcp-trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(trace, null, 2)),
+    },
+  ]);
+
+  await expect(page.getByText("MCP tool-call trace imported.")).toBeVisible();
+  await expect(page.getByText("# MCP Tool-Call Trace Import")).toBeVisible();
+  await expect(
+    page.getByText("Imported MCP session declared two tool calls."),
+  ).toBeVisible();
+
+  const importedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const manifestArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "manifest.json",
+  );
+  const traceArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trace.json",
+  );
+  const auditArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "audit.json",
+  );
+  const manifest = JSON.parse(manifestArtifact.content);
+  const importedTrace = JSON.parse(traceArtifact.content);
+  const audit = JSON.parse(auditArtifact.content);
+
+  expect(importedTask.status).toBe("completed");
+  expect(manifest.packetType).toBe("mcp_tool_call");
+  expect(manifest.producer.adapter).toBe("mcpToolCallRecorder");
+  expect(manifest.session.importedTrace).toBe(true);
+  expect(manifest.audit.toolCallCount).toBe(2);
+  expect(manifest.audit.runtimeEventCount).toBe(1);
+  expect(manifest.audit.credentialPurposes).toEqual(["none_declared"]);
+  expect(manifest.coverage.enforcement).toContain(
+    "Trace import records MCP tool calls after execution; it does not enforce MCP permissions.",
+  );
+  expect(importedTrace.kind).toBe("wutai.mcp_tool_call_trace");
+  expect(importedTrace.toolCalls).toHaveLength(2);
+  expect(audit.toolCalls[0].kind).toBe("mcp_tool_call");
+  expect(audit.toolCalls[1].serverName).toBe("git-mcp");
+  expect(audit.resources).toEqual(["docs/architecture.md", "git status"]);
+});
+
+test("ingests user-selected local files as a v0.2 work packet", async ({ page }) => {
+  await page.goto("/");
+
+  const notes = "# Review Notes\n\nKeep the packet boundary narrow.\n";
+  const policy = '{"policy":"local-only"}\n';
+
+  await page.getByLabel("Local files").setInputFiles([
+    {
+      name: "notes.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(notes),
+    },
+    {
+      name: "policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(policy),
+    },
+  ]);
+
+  await expect(page.getByText("Local files imported.")).toBeVisible();
+  await expect(page.getByText("# Local File Ingestion")).toBeVisible();
+  await expect(page.getByText("Keep the packet boundary narrow.")).toBeVisible();
+
+  const importedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const manifestArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "manifest.json",
+  );
+  const filesArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "files.json",
+  );
+  const auditArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "audit.json",
+  );
+  const manifest = JSON.parse(manifestArtifact.content);
+  const files = JSON.parse(filesArtifact.content);
+  const audit = JSON.parse(auditArtifact.content);
+
+  expect(importedTask.status).toBe("completed");
+  expect(manifest.packetType).toBe("local_file");
+  expect(manifest.producer.adapter).toBe("localFileIngestion");
+  expect(manifest.session.importedTrace).toBe(false);
+  expect(manifest.audit.toolCallCount).toBe(0);
+  expect(manifest.audit.runtimeEventCount).toBe(1);
+  expect(manifest.artifacts.map((item: { name: string }) => item.name)).toEqual([
+    "report.md",
+    "files.json",
+    "audit.json",
+  ]);
+  expect(manifest.artifacts[1].role).toBe("file_inventory");
+  expect(manifest.coverage.enforcement).toContain(
+    "Local file ingestion is a user-selected read path only.",
+  );
+  expect(files.kind).toBe("wutai.local_file_ingestion");
+  expect(files.limits.fullContentRetained).toBe(false);
+  expect(files.files).toHaveLength(2);
+  expect(files.files[0].sha256).toBe(sha256Hex(notes));
+  expect(files.files[0].previewText).toContain("Keep the packet boundary narrow.");
+  expect(audit.fileReads).toHaveLength(2);
+  expect(audit.fileReads[0].contentRetention).toBe(
+    "metadata_hash_and_bounded_preview_only",
+  );
+});
+
 test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   await page.goto("/");
 

@@ -149,6 +149,38 @@ JSON file and converts it into a local `coding_agent` work packet.
 
 Use this as post-hoc review evidence only. It is not live supervision.
 
+## MCP Tool-Call Trace Import Boundary
+
+The MCP tool-call trace importer accepts a declared
+`wutai.mcp_tool_call_trace` JSON file and converts it into a local
+`mcp_tool_call` work packet.
+
+- It records declared MCP server/tool names, request summaries, bounded
+  argument previews, result summaries, resources, credential purposes, audit
+  trail, and artifact hashes.
+- It does not proxy the MCP connection, execute tools, approve or block tool
+  calls, replay requests, or verify the trace is complete.
+- It does not mediate credentials, filesystem access, network access, or MCP
+  server permissions.
+
+Use this as post-hoc review evidence only. It is not a live MCP permission
+broker.
+
+## Local File Ingestion Boundary
+
+Local file ingestion reads only files explicitly selected by the user through
+the file picker and converts them into a local `local_file` work packet.
+
+- It records file name/path labels, MIME type, size, SHA-256, bounded text
+  preview, file-read audit entries, and artifact hashes.
+- It does not crawl directories, watch future file changes, retain full file
+  contents, or grant file access to a downstream agent.
+- It does not prove that the selected files are still unchanged after import;
+  later verification requires re-importing or comparing the recorded hash.
+
+Use this as a bounded evidence-ingestion path only. It is not a general
+filesystem permission broker.
+
 ## Credential Boundary
 
 Agents should not receive broad permanent credentials by default. Wutai should:

@@ -10,7 +10,9 @@ export type WorkPacketType =
   | "research"
   | "coding_agent"
   | "browser_task"
-  | "local_script";
+  | "local_script"
+  | "mcp_tool_call"
+  | "local_file";
 
 export interface WorkPacketProducer {
   name: "wutai";
@@ -106,6 +108,49 @@ const DEFAULT_LOCAL_SCRIPT_COVERAGE: WorkPacketCoverage = {
   ],
 };
 
+const DEFAULT_MCP_TOOL_CALL_COVERAGE: WorkPacketCoverage = {
+  captured: [
+    "task_request",
+    "permission_decisions",
+    "imported_mcp_tool_call_trace",
+    "declared_tool_calls",
+    "runtime_summary",
+    "audit_trail",
+    "artifact_hashes",
+  ],
+  blindSpots: [
+    "The MCP trace is accepted as declared input; Wutai does not proxy or replay the MCP session.",
+    "Arguments and tool results are bounded summaries unless the imported trace declares more detail.",
+    "Trace completeness depends on the imported file.",
+  ],
+  enforcement: [
+    "Trace import records MCP tool calls after execution; it does not enforce MCP permissions.",
+    "No runtime MCP proxy, credential mediation, or tool approval is implemented in this path.",
+  ],
+};
+
+const DEFAULT_LOCAL_FILE_COVERAGE: WorkPacketCoverage = {
+  captured: [
+    "task_request",
+    "permission_decisions",
+    "user_selected_files",
+    "file_metadata",
+    "file_hashes",
+    "bounded_text_previews",
+    "audit_trail",
+    "artifact_hashes",
+  ],
+  blindSpots: [
+    "Wutai only ingests files explicitly selected by the user.",
+    "File contents are not fully retained in the packet; only metadata, SHA-256, and bounded previews are stored.",
+    "Wutai does not watch for later file changes after ingestion.",
+  ],
+  enforcement: [
+    "Local file ingestion is a user-selected read path only.",
+    "No filesystem watcher, broad directory crawler, or downstream agent file-access policy is implemented in this path.",
+  ],
+};
+
 const DEFAULT_FUTURE_SESSION_COVERAGE: WorkPacketCoverage = {
   captured: [
     "task_request",
@@ -127,6 +172,8 @@ const DEFAULT_FUTURE_SESSION_COVERAGE: WorkPacketCoverage = {
 function defaultCoverage(packetType: WorkPacketType): WorkPacketCoverage {
   if (packetType === "research") return DEFAULT_RESEARCH_COVERAGE;
   if (packetType === "local_script") return DEFAULT_LOCAL_SCRIPT_COVERAGE;
+  if (packetType === "mcp_tool_call") return DEFAULT_MCP_TOOL_CALL_COVERAGE;
+  if (packetType === "local_file") return DEFAULT_LOCAL_FILE_COVERAGE;
   return DEFAULT_FUTURE_SESSION_COVERAGE;
 }
 
@@ -149,6 +196,7 @@ function artifactRole(name: string) {
   if (name === "verification.json") return "evidence_verification";
   if (name === "policy.json") return "policy_preflight";
   if (name === "trace.json") return "runtime_trace";
+  if (name === "files.json") return "file_inventory";
   if (name === "ledger.json") return "session_ledger";
   if (name === "audit.json") return "audit_trail";
   return "supporting_artifact";

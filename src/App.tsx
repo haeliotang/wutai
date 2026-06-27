@@ -23,8 +23,16 @@ import {
   importCodingAgentTrace,
   parseCodingAgentTrace,
 } from "./runtime/codingAgentTraceImporter";
+import {
+  importLocalFiles,
+  readLocalFileIngestionFiles,
+} from "./runtime/localFileIngestion";
 import { importCliPacketFiles } from "./runtime/cliPacketImporter";
 import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
+import {
+  importMcpToolCallTrace,
+  parseMcpToolCallTrace,
+} from "./runtime/mcpToolCallRecorder";
 import {
   EMPTY_TRUSTED_PRODUCER_POLICY,
   parseTrustedProducerPolicy,
@@ -377,6 +385,8 @@ export default function App() {
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
   const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
   const codingAgentTraceInputRef = useRef<HTMLInputElement | null>(null);
+  const mcpToolCallTraceInputRef = useRef<HTMLInputElement | null>(null);
+  const localFileIngestionInputRef = useRef<HTMLInputElement | null>(null);
   const trustedProducerPolicyInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -838,6 +848,49 @@ export default function App() {
     }
   }
 
+  async function importMcpToolCallTraceTask(files: FileList | null) {
+    const file = files?.[0];
+    if (!taskStore || !artifactWriter || !file) return;
+
+    setError(null);
+    try {
+      const trace = parseMcpToolCallTrace(await file.text());
+      const task = await importMcpToolCallTrace(artifactWriter, trace);
+      await persist(task);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not import the MCP tool-call trace.",
+      );
+    } finally {
+      if (mcpToolCallTraceInputRef.current) {
+        mcpToolCallTraceInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function importLocalFileIngestionTask(files: FileList | null) {
+    if (!taskStore || !artifactWriter || !files || files.length === 0) return;
+
+    setError(null);
+    try {
+      const selectedFiles = await readLocalFileIngestionFiles(files);
+      const task = await importLocalFiles(artifactWriter, selectedFiles);
+      await persist(task);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not ingest the selected local files.",
+      );
+    } finally {
+      if (localFileIngestionInputRef.current) {
+        localFileIngestionInputRef.current.value = "";
+      }
+    }
+  }
+
   async function loadTrustedProducerPolicy(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
@@ -1094,8 +1147,9 @@ export default function App() {
         <h1>Local trust layer for agentic work</h1>
         <p>
           v0.2 foundation. Supervised research sessions, local-script trace
-          import, CLI packet review, task-scoped permission, Evidence Gate
-          checks, and local work packets.
+          import, external trace review, local file ingestion, CLI packet
+          review, task-scoped permission, Evidence Gate checks, and local work
+          packets.
         </p>
         <p className="runtime-line">
           Storage: {taskStore?.backendName ?? "initializing"} / Artifacts:{" "}
@@ -1167,6 +1221,18 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => mcpToolCallTraceInputRef.current?.click()}
+            >
+              Import MCP tool-call trace
+            </button>
+            <button
+              type="button"
+              onClick={() => localFileIngestionInputRef.current?.click()}
+            >
+              Ingest local files
+            </button>
+            <button
+              type="button"
               onClick={() => cliPacketInputRef.current?.click()}
             >
               Import CLI packet files
@@ -1213,6 +1279,24 @@ export default function App() {
               aria-label="Coding agent trace"
               accept=".json"
               onChange={(event) => void importCodingAgentTraceTask(event.target.files)}
+            />
+            <input
+              ref={mcpToolCallTraceInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="MCP tool-call trace"
+              accept=".json"
+              onChange={(event) => void importMcpToolCallTraceTask(event.target.files)}
+            />
+            <input
+              ref={localFileIngestionInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="Local files"
+              multiple
+              onChange={(event) =>
+                void importLocalFileIngestionTask(event.target.files)
+              }
             />
             <input
               ref={cliPacketDirectoryInputRef}

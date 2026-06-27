@@ -10,11 +10,12 @@ auditable, stoppable, and reviewable.
 
 > Repository status: v0.2 foundation in progress. The current code implements
 > one supervised research workflow, a v0.2 work-packet manifest, and a
-> local-script trace-import, coding-agent trace-import, and developer CLI
-> wrapper wedge. It does not yet
+> local-script trace-import, coding-agent trace-import, MCP tool-call
+> trace-import, local file ingestion, and developer CLI wrapper wedge. It does
+> not yet
 > sandbox commands, enforce a general permission broker, or supervise arbitrary
-> external agents, browser-control runtimes, MCP tools, live coding agents, or
-> full computer-use sessions.
+> external agents, browser-control runtimes, live MCP sessions, live coding
+> agents, or full computer-use sessions.
 
 ## Why This Exists
 
@@ -38,7 +39,8 @@ that records, scopes, and verifies agentic work.
 
 The v0.1 scaffold proves this loop with a bounded research workflow. The v0.2
 foundation extends the work-packet model with local-script trace import,
-coding-agent trace import, and a developer CLI wrapper:
+coding-agent trace import, MCP tool-call trace import, local file ingestion,
+and a developer CLI wrapper:
 
 ```text
 natural-language task
@@ -72,6 +74,12 @@ Implemented:
 - Coding-agent trace importer that turns an already-run external coding-agent
   session trace into a reviewable `coding_agent` work packet without executing
   the agent, approving tool calls, or supervising filesystem access.
+- MCP tool-call trace importer that turns an already-run MCP session trace into
+  a reviewable `mcp_tool_call` work packet without proxying the MCP connection,
+  approving tool calls, or mediating credentials.
+- Local file ingestion for user-selected files. Wutai records file metadata,
+  SHA-256 hashes, bounded text previews, and audit entries without crawling
+  directories, watching later changes, or retaining full file contents.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs structured policy preflight from `config/wutai-cli-policy-profiles.json`,
@@ -117,6 +125,24 @@ trace.json
 audit.json
 ```
 
+Each imported MCP tool-call trace writes:
+
+```text
+manifest.json
+report.md
+trace.json
+audit.json
+```
+
+Each local file ingestion writes:
+
+```text
+manifest.json
+report.md
+files.json
+audit.json
+```
+
 Each developer CLI wrapper run writes:
 
 ```text
@@ -147,7 +173,7 @@ Not implemented:
 
 - Runtime-enforced supervised sessions for arbitrary external agents.
 - Shell command execution under a full Wutai permission broker or sandbox.
-- MCP proxy or tool-call recorder.
+- Live MCP proxy or runtime MCP tool-call recorder.
 - Browser-use, Codex, Claude Code, or full computer-use supervision.
 - Cross-agent credential broker.
 - Mobile approval companion.
@@ -415,20 +441,21 @@ direction:
 Near-term engineering work:
 
 - Continue generalizing the work-packet manifest beyond research, imported
-  local-script traces, and developer CLI wrapper runs.
+  local-script traces, external trace imports, local file ingestion, and
+  developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Harden trusted-key enrollment and producer trust policy for signed CLI packets.
 - Add more regression coverage and validation for externally configurable rule
   overrides.
-- Add MCP tool-call recorder or local file ingestion after the imported trace
-  contracts are stable.
+- Harden MCP trace and local file-ingestion schemas with negative-case
+  validation.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:
 
-- MCP proxy or tool-call recorder.
+- Live MCP proxy or runtime tool-call recorder.
 - Browser-agent supervision.
-- Coding-agent trace import or adapter.
+- Live coding-agent adapter.
 - Computer-use supervision after stronger safety controls.
 - Mobile approval companion for high-risk confirmations.
 

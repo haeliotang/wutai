@@ -15,6 +15,9 @@ export type PermissionType =
   | "artifact_write"
   | "local_script_trace_import"
   | "coding_agent_trace_import"
+  | "mcp_tool_call_trace_import"
+  | "local_file_ingestion"
+  | "local_file_read"
   | "local_script_execution";
 
 export type PermissionStatus = "pending" | "approved" | "denied";
