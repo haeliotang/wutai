@@ -197,6 +197,7 @@ function artifactRole(name: string) {
   if (name === "policy.json") return "policy_preflight";
   if (name === "trace.json") return "runtime_trace";
   if (name === "files.json") return "file_inventory";
+  if (name === "file-check.json") return "file_hash_check";
   if (name === "ledger.json") return "session_ledger";
   if (name === "audit.json") return "audit_trail";
   return "supporting_artifact";

@@ -76,10 +76,14 @@ Implemented:
   the agent, approving tool calls, or supervising filesystem access.
 - MCP tool-call trace importer that turns an already-run MCP session trace into
   a reviewable `mcp_tool_call` work packet without proxying the MCP connection,
-  approving tool calls, or mediating credentials.
+  approving tool calls, or mediating credentials. The importer rejects missing
+  required fields, invalid status/timestamp shapes, negative latency, and
+  overlarge tool-call batches before creating a task.
 - Local file ingestion for user-selected files. Wutai records file metadata,
   SHA-256 hashes, bounded text previews, and audit entries without crawling
-  directories, watching later changes, or retaining full file contents.
+  directories, watching later changes, or retaining full file contents. The UI
+  can re-check a file packet against newly selected files and save the result
+  as `file-check.json`.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs structured policy preflight from `config/wutai-cli-policy-profiles.json`,
@@ -141,6 +145,7 @@ manifest.json
 report.md
 files.json
 audit.json
+file-check.json   # optional, only after a hash re-check
 ```
 
 Each developer CLI wrapper run writes:
@@ -447,8 +452,7 @@ Near-term engineering work:
 - Harden trusted-key enrollment and producer trust policy for signed CLI packets.
 - Add more regression coverage and validation for externally configurable rule
   overrides.
-- Harden MCP trace and local file-ingestion schemas with negative-case
-  validation.
+- Harden local review artifacts and trusted-key enrollment UX.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

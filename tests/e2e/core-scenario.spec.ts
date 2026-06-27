@@ -377,13 +377,54 @@ test("imports an MCP tool-call trace as a v0.2 work packet", async ({ page }) =>
   expect(audit.resources).toEqual(["docs/architecture.md", "git status"]);
 });
 
+test("rejects invalid MCP tool-call traces without creating a packet", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.mcp_tool_call_trace",
+    serverName: "filesystem-mcp",
+    title: "Invalid MCP trace",
+    userRequest: "This trace is missing a required tool name.",
+    startedAt: "2026-06-27T09:00:00.000Z",
+    completedAt: "2026-06-27T09:01:00.000Z",
+    status: "completed",
+    summary: "Invalid fixture.",
+    toolCalls: [
+      {
+        requestSummary: "Missing toolName should fail validation.",
+        status: "completed",
+      },
+    ],
+  };
+
+  await page.getByLabel("MCP tool-call trace").setInputFiles([
+    {
+      name: "bad-mcp-trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(trace, null, 2)),
+    },
+  ]);
+
+  await expect(
+    page.getByText("MCP tool-call trace must provide toolCalls[].toolName."),
+  ).toBeVisible();
+
+  const taskCount = await page.evaluate(
+    () => JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]").length,
+  );
+  expect(taskCount).toBe(0);
+});
+
 test("ingests user-selected local files as a v0.2 work packet", async ({ page }) => {
   await page.goto("/");
 
   const notes = "# Review Notes\n\nKeep the packet boundary narrow.\n";
   const policy = '{"policy":"local-only"}\n';
 
-  await page.getByLabel("Local files").setInputFiles([
+  await page.getByLabel("Local files", { exact: true }).setInputFiles([
     {
       name: "notes.md",
       mimeType: "text/markdown",
@@ -441,6 +482,65 @@ test("ingests user-selected local files as a v0.2 work packet", async ({ page })
   expect(audit.fileReads[0].contentRetention).toBe(
     "metadata_hash_and_bounded_preview_only",
   );
+
+  await expect(
+    page.getByRole("button", { name: "Re-check local file hashes" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Local files re-check").setInputFiles([
+    {
+      name: "notes.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(notes),
+    },
+    {
+      name: "policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from('{"policy":"changed"}\n'),
+    },
+  ]);
+
+  await expect(page.getByText("Local file hash re-check failed.")).toBeVisible();
+  await expect(page.getByText("1 passed, 1 failed, 0 missing.")).toBeVisible();
+
+  const checkedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const checkArtifact = checkedTask.artifacts.find(
+    (item: { name: string }) => item.name === "file-check.json",
+  );
+  const check = JSON.parse(checkArtifact.content);
+  expect(checkedTask.status).toBe("completed_with_warnings");
+  expect(check.kind).toBe("wutai.local_file_hash_check");
+  expect(check.status).toBe("failed");
+  expect(check.checks.map((item: { status: string }) => item.status)).toEqual([
+    "passed",
+    "mismatch",
+  ]);
+});
+
+test("rejects local file ingestion batches over the file-count limit", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await page.getByLabel("Local files", { exact: true }).setInputFiles(
+    Array.from({ length: 13 }, (_, index) => ({
+      name: `file-${index + 1}.txt`,
+      mimeType: "text/plain",
+      buffer: Buffer.from(`file ${index + 1}`),
+    })),
+  );
+
+  await expect(
+    page.getByText("Local file ingestion accepts up to 12 files at a time."),
+  ).toBeVisible();
+
+  const taskCount = await page.evaluate(
+    () => JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]").length,
+  );
+  expect(taskCount).toBe(0);
 });
 
 test("imports a CLI wrapper packet for desktop review", async ({ page }) => {

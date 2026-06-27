@@ -7,6 +7,8 @@ import {
 } from "../domain/task";
 import { appendWorkPacketManifest } from "../domain/workPacket";
 
+const MAX_TOOL_CALLS = 100;
+
 export interface McpToolCallInput {
   toolCallId?: string;
   serverName?: string;
@@ -104,6 +106,14 @@ function normalizeToolCalls(value: unknown): McpToolCallInput[] {
   if (!Array.isArray(value)) {
     throw new Error("MCP tool-call trace must provide a toolCalls array.");
   }
+  if (value.length === 0) {
+    throw new Error("MCP tool-call trace must declare at least one tool call.");
+  }
+  if (value.length > MAX_TOOL_CALLS) {
+    throw new Error(
+      `MCP tool-call trace accepts up to ${MAX_TOOL_CALLS} tool calls.`,
+    );
+  }
   return value.map((item, index) => {
     const tool = asRecord(item);
     if (!tool) {
@@ -116,6 +126,9 @@ function normalizeToolCalls(value: unknown): McpToolCallInput[] {
       typeof latencyMs !== "number"
     ) {
       throw new Error(`MCP tool call ${index + 1} latencyMs must be numeric.`);
+    }
+    if (typeof latencyMs === "number" && latencyMs < 0) {
+      throw new Error(`MCP tool call ${index + 1} latencyMs cannot be negative.`);
     }
 
     return {
@@ -152,6 +165,17 @@ function normalizeToolCalls(value: unknown): McpToolCallInput[] {
   });
 }
 
+function assertTimestampOrder(startedAt: string, completedAt: string) {
+  const started = Date.parse(startedAt);
+  const completed = Date.parse(completedAt);
+  if (Number.isNaN(started) || Number.isNaN(completed)) {
+    throw new Error("MCP tool-call trace timestamps must be valid ISO timestamps.");
+  }
+  if (completed < started) {
+    throw new Error("MCP tool-call trace completedAt cannot be before startedAt.");
+  }
+}
+
 export function parseMcpToolCallTrace(content: string): McpToolCallTraceInput {
   let parsed: unknown;
   try {
@@ -168,6 +192,10 @@ export function parseMcpToolCallTrace(content: string): McpToolCallTraceInput {
     throw new Error(`Unsupported MCP tool-call trace kind: ${String(root.kind)}.`);
   }
 
+  const startedAt = stringValue(root.startedAt, "startedAt");
+  const completedAt = stringValue(root.completedAt, "completedAt");
+  assertTimestampOrder(startedAt, completedAt);
+
   return {
     schemaVersion:
       typeof root.schemaVersion === "number" ? root.schemaVersion : 1,
@@ -177,8 +205,8 @@ export function parseMcpToolCallTrace(content: string): McpToolCallTraceInput {
     sessionId: stringValue(root.sessionId, "sessionId", { optional: true }),
     title: stringValue(root.title, "title"),
     userRequest: stringValue(root.userRequest, "userRequest"),
-    startedAt: stringValue(root.startedAt, "startedAt"),
-    completedAt: stringValue(root.completedAt, "completedAt"),
+    startedAt,
+    completedAt,
     status: normalizeTraceStatus(root.status),
     summary: stringValue(root.summary, "summary"),
     toolCalls: normalizeToolCalls(root.toolCalls),

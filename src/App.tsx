@@ -24,8 +24,11 @@ import {
   parseCodingAgentTrace,
 } from "./runtime/codingAgentTraceImporter";
 import {
+  buildLocalFileHashCheck,
   importLocalFiles,
   readLocalFileIngestionFiles,
+  type LocalFileHashCheckArtifact,
+  type LocalFileIngestionFile,
 } from "./runtime/localFileIngestion";
 import { importCliPacketFiles } from "./runtime/cliPacketImporter";
 import { importLocalScriptTrace } from "./runtime/localScriptTraceImporter";
@@ -191,6 +194,15 @@ interface CliReviewArtifact {
   policyProfile?: string | null;
   executionMode?: string | null;
   note?: string;
+  limitation?: string;
+}
+
+interface LocalFileIngestionArtifact {
+  schemaVersion?: number;
+  kind?: "wutai.local_file_ingestion";
+  taskId?: string;
+  generatedAt?: string;
+  files?: LocalFileIngestionFile[];
   limitation?: string;
 }
 
@@ -387,6 +399,7 @@ export default function App() {
   const codingAgentTraceInputRef = useRef<HTMLInputElement | null>(null);
   const mcpToolCallTraceInputRef = useRef<HTMLInputElement | null>(null);
   const localFileIngestionInputRef = useRef<HTMLInputElement | null>(null);
+  const localFileRecheckInputRef = useRef<HTMLInputElement | null>(null);
   const trustedProducerPolicyInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -684,6 +697,18 @@ export default function App() {
     [activeTask],
   );
 
+  const filesArtifact = useMemo(
+    () => activeTask?.artifacts.find((item) => item.name === "files.json") ?? null,
+    [activeTask],
+  );
+
+  const fileCheckArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "file-check.json") ??
+      null,
+    [activeTask],
+  );
+
   const verificationArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "verification.json") ??
@@ -735,6 +760,28 @@ export default function App() {
     reviewArtifact,
     traceArtifact,
   ]);
+
+  const localFileReview = useMemo(() => {
+    if (!manifestArtifact || !filesArtifact) return null;
+
+    const manifest = parseJsonArtifact<WorkPacketManifestArtifact>(
+      manifestArtifact.content,
+    );
+    if (
+      manifest?.packetType !== "local_file" ||
+      manifest.producer?.adapter !== "localFileIngestion"
+    ) {
+      return null;
+    }
+
+    return {
+      manifest,
+      files: parseJsonArtifact<LocalFileIngestionArtifact>(filesArtifact.content),
+      check: fileCheckArtifact
+        ? parseJsonArtifact<LocalFileHashCheckArtifact>(fileCheckArtifact.content)
+        : null,
+    };
+  }, [fileCheckArtifact, filesArtifact, manifestArtifact]);
 
   const cliDryRunReview = useMemo(() => {
     if (!activeTask || !cliPacketReview) return null;
@@ -887,6 +934,71 @@ export default function App() {
     } finally {
       if (localFileIngestionInputRef.current) {
         localFileIngestionInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function recheckLocalFileHashes(files: FileList | null) {
+    if (
+      !activeTask ||
+      !taskStore ||
+      !localFileReview?.files?.files ||
+      !files ||
+      files.length === 0
+    ) {
+      return;
+    }
+
+    setError(null);
+    try {
+      const now = new Date().toISOString();
+      const selectedFiles = await readLocalFileIngestionFiles(files);
+      const check = buildLocalFileHashCheck(
+        activeTask.taskId,
+        localFileReview.files.files,
+        selectedFiles,
+        now,
+      );
+      const checkRecord: WutaiTask["artifacts"][number] = {
+        artifactId: `${activeTask.taskId}_artifact_file_check_json`,
+        taskId: activeTask.taskId,
+        type: "json",
+        name: "file-check.json",
+        virtualPath: `imported/${activeTask.taskId}/file-check.json`,
+        content: JSON.stringify(check, null, 2),
+        createdAt: now,
+      };
+      const withoutPriorCheck = activeTask.artifacts.filter(
+        (artifact) => artifact.name !== "file-check.json",
+      );
+      let nextTask: WutaiTask = {
+        ...activeTask,
+        status: check.status === "passed" ? "completed" : "completed_with_warnings",
+        updatedAt: now,
+        artifacts: [...withoutPriorCheck, checkRecord],
+      };
+      nextTask = appendEvent(nextTask, {
+        type: "RuntimeEventCaptured",
+        summary: `Local file hash re-check ${check.status}.`,
+        details: check.summary,
+        visibility: "user",
+      });
+      nextTask = appendEvent(nextTask, {
+        type: "ArtifactCreated",
+        summary: "Saved local file hash re-check artifact.",
+        details: "file-check.json records hash comparisons for selected files only.",
+        visibility: "user",
+      });
+      await persist(nextTask);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not re-check the selected local files.",
+      );
+    } finally {
+      if (localFileRecheckInputRef.current) {
+        localFileRecheckInputRef.current.value = "";
       }
     }
   }
@@ -1297,6 +1409,14 @@ export default function App() {
               onChange={(event) =>
                 void importLocalFileIngestionTask(event.target.files)
               }
+            />
+            <input
+              ref={localFileRecheckInputRef}
+              type="file"
+              className="file-input-hidden"
+              aria-label="Local files re-check"
+              multiple
+              onChange={(event) => void recheckLocalFileHashes(event.target.files)}
             />
             <input
               ref={cliPacketDirectoryInputRef}
@@ -2107,6 +2227,89 @@ export default function App() {
                         </button>
                       ))}
                   </div>
+                </section>
+              )}
+
+              {localFileReview && (
+                <section className="artifact-section">
+                  <div className="panel-header">
+                    <h2>Local File Hash Review</h2>
+                    <div className="panel-actions">
+                      <button
+                        type="button"
+                        onClick={() => localFileRecheckInputRef.current?.click()}
+                      >
+                        Re-check local file hashes
+                      </button>
+                      {filesArtifact && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadArtifact(filesArtifact.name, filesArtifact.content)
+                          }
+                        >
+                          Download files.json
+                        </button>
+                      )}
+                      {fileCheckArtifact && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadArtifact(
+                              fileCheckArtifact.name,
+                              fileCheckArtifact.content,
+                            )
+                          }
+                        >
+                          Download file-check.json
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="integrity-metrics">
+                    <span>
+                      Files{" "}
+                      <strong>{localFileReview.files?.files?.length ?? 0}</strong>
+                    </span>
+                    <span>
+                      Last Check{" "}
+                      <strong>{localFileReview.check?.status ?? "not run"}</strong>
+                    </span>
+                    <span>
+                      Summary{" "}
+                      <strong>{localFileReview.check?.summary ?? "n/a"}</strong>
+                    </span>
+                  </div>
+                  {localFileReview.check ? (
+                    <div className="integrity-check-list">
+                      {localFileReview.check.checks.map((check, index) => (
+                        <div key={`${check.path}_${index}`}>
+                          <span
+                            className={`integrity-status integrity-check-${
+                              check.status === "passed" ? "passed" : "mismatch"
+                            }`}
+                          >
+                            {check.status}
+                          </span>
+                          <div>
+                            <strong>{check.path}</strong>
+                            <p>{check.message}</p>
+                            <code>
+                              expected {shortHash(check.expectedSha256)} / actual{" "}
+                              {shortHash(check.actualSha256)}
+                            </code>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      No hash re-check has been recorded for this file packet.
+                    </p>
+                  )}
+                  {localFileReview.files?.limitation && (
+                    <p className="muted">{localFileReview.files.limitation}</p>
+                  )}
                 </section>
               )}
 

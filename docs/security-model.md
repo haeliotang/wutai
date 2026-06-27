@@ -158,6 +158,9 @@ The MCP tool-call trace importer accepts a declared
 - It records declared MCP server/tool names, request summaries, bounded
   argument previews, result summaries, resources, credential purposes, audit
   trail, and artifact hashes.
+- It rejects malformed traces such as missing required tool names, invalid trace
+  status, invalid timestamp order, negative latency, or overlarge tool-call
+  batches before creating a local task.
 - It does not proxy the MCP connection, execute tools, approve or block tool
   calls, replay requests, or verify the trace is complete.
 - It does not mediate credentials, filesystem access, network access, or MCP
@@ -173,6 +176,10 @@ the file picker and converts them into a local `local_file` work packet.
 
 - It records file name/path labels, MIME type, size, SHA-256, bounded text
   preview, file-read audit entries, and artifact hashes.
+- It limits ingestion to a bounded batch size and bounded per-file size before
+  hashing or previewing content.
+- It can re-check a local file packet by comparing newly selected files against
+  the recorded SHA-256 and byte size, then saving `file-check.json`.
 - It does not crawl directories, watch future file changes, retain full file
   contents, or grant file access to a downstream agent.
 - It does not prove that the selected files are still unchanged after import;

@@ -8,6 +8,7 @@ import {
 import { appendWorkPacketManifest } from "../domain/workPacket";
 
 const MAX_FILES = 12;
+const MAX_FILE_BYTES = 1024 * 1024;
 const PREVIEW_BYTE_LIMIT = 64 * 1024;
 const PREVIEW_CHAR_LIMIT = 1_200;
 
@@ -20,6 +21,30 @@ export interface LocalFileIngestionFile {
   sha256: string;
   previewText?: string;
   previewTruncated: boolean;
+  contentClass: "empty" | "text" | "binary_or_large";
+}
+
+export interface LocalFileHashCheck {
+  path: string;
+  expectedSha256?: string;
+  actualSha256?: string;
+  expectedBytes?: number;
+  actualBytes?: number;
+  status: "passed" | "mismatch" | "missing" | "unexpected";
+  message: string;
+}
+
+export interface LocalFileHashCheckArtifact {
+  schemaVersion: 1;
+  kind: "wutai.local_file_hash_check";
+  taskId: string;
+  generatedAt: string;
+  status: "passed" | "failed" | "incomplete";
+  summary: string;
+  expectedFileCount: number;
+  selectedFileCount: number;
+  checks: LocalFileHashCheck[];
+  limitation: string;
 }
 
 async function sha256Hex(buffer: ArrayBuffer) {
@@ -29,11 +54,31 @@ async function sha256Hex(buffer: ArrayBuffer) {
     .join("");
 }
 
+function classifyContent(
+  bytes: Uint8Array,
+  size: number,
+): LocalFileIngestionFile["contentClass"] {
+  if (size === 0) return "empty";
+  if (size > PREVIEW_BYTE_LIMIT) return "binary_or_large";
+  if (bytes.some((byte) => byte === 0)) return "binary_or_large";
+  return "text";
+}
+
 function boundedPreview(bytes: Uint8Array, size: number) {
+  const contentClass = classifyContent(bytes, size);
+  if (contentClass !== "text") {
+    return {
+      previewText: undefined,
+      previewTruncated: contentClass === "binary_or_large",
+      contentClass,
+    };
+  }
+
   if (size > PREVIEW_BYTE_LIMIT) {
     return {
       previewText: undefined,
       previewTruncated: true,
+      contentClass,
     };
   }
 
@@ -42,6 +87,7 @@ function boundedPreview(bytes: Uint8Array, size: number) {
   return {
     previewText: withoutNulls.slice(0, PREVIEW_CHAR_LIMIT),
     previewTruncated: withoutNulls.length > PREVIEW_CHAR_LIMIT,
+    contentClass,
   };
 }
 
@@ -56,6 +102,11 @@ export async function readLocalFileIngestionFiles(files: FileList | File[]) {
 
   return Promise.all(
     selected.map(async (file): Promise<LocalFileIngestionFile> => {
+      if (file.size > MAX_FILE_BYTES) {
+        throw new Error(
+          `Local file ingestion accepts files up to ${MAX_FILE_BYTES} bytes: ${file.name}.`,
+        );
+      }
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       const preview = boundedPreview(bytes, file.size);
@@ -68,9 +119,95 @@ export async function readLocalFileIngestionFiles(files: FileList | File[]) {
         sha256: await sha256Hex(buffer),
         previewText: preview.previewText,
         previewTruncated: preview.previewTruncated,
+        contentClass: preview.contentClass,
       };
     }),
   );
+}
+
+function fileIdentity(file: Pick<LocalFileIngestionFile, "name" | "relativePath">) {
+  return file.relativePath || file.name;
+}
+
+export function buildLocalFileHashCheck(
+  taskId: string,
+  expectedFiles: LocalFileIngestionFile[],
+  selectedFiles: LocalFileIngestionFile[],
+  generatedAt = new Date().toISOString(),
+): LocalFileHashCheckArtifact {
+  const selectedByPath = new Map(
+    selectedFiles.map((file) => [fileIdentity(file), file]),
+  );
+  const expectedByPath = new Map(
+    expectedFiles.map((file) => [fileIdentity(file), file]),
+  );
+
+  const checks: LocalFileHashCheck[] = expectedFiles.map((expected) => {
+    const path = fileIdentity(expected);
+    const selected = selectedByPath.get(path);
+    if (!selected) {
+      return {
+        path,
+        expectedSha256: expected.sha256,
+        expectedBytes: expected.size,
+        status: "missing",
+        message: "Expected file was not selected for re-check.",
+      };
+    }
+    if (selected.sha256 !== expected.sha256 || selected.size !== expected.size) {
+      return {
+        path,
+        expectedSha256: expected.sha256,
+        actualSha256: selected.sha256,
+        expectedBytes: expected.size,
+        actualBytes: selected.size,
+        status: "mismatch",
+        message: "Selected file no longer matches the recorded hash or byte size.",
+      };
+    }
+    return {
+      path,
+      expectedSha256: expected.sha256,
+      actualSha256: selected.sha256,
+      expectedBytes: expected.size,
+      actualBytes: selected.size,
+      status: "passed",
+      message: "Selected file matches the recorded hash and byte size.",
+    };
+  });
+
+  selectedFiles.forEach((selected) => {
+    const path = fileIdentity(selected);
+    if (expectedByPath.has(path)) return;
+    checks.push({
+      path,
+      actualSha256: selected.sha256,
+      actualBytes: selected.size,
+      status: "unexpected",
+      message: "Selected file was not part of the original ingestion packet.",
+    });
+  });
+
+  const failed = checks.filter((check) =>
+    ["mismatch", "unexpected"].includes(check.status),
+  ).length;
+  const missing = checks.filter((check) => check.status === "missing").length;
+  const passed = checks.filter((check) => check.status === "passed").length;
+  const status = failed > 0 ? "failed" : missing > 0 ? "incomplete" : "passed";
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.local_file_hash_check",
+    taskId,
+    generatedAt,
+    status,
+    summary: `${passed} passed, ${failed} failed, ${missing} missing.`,
+    expectedFileCount: expectedFiles.length,
+    selectedFileCount: selectedFiles.length,
+    checks,
+    limitation:
+      "This check compares user-selected files against the packet hashes. Wutai does not read files that were not selected for this re-check.",
+  };
 }
 
 function buildEvent(
@@ -231,6 +368,7 @@ export async function importLocalFiles(
     captureMode: "user_selected_files",
     limits: {
       maxFiles: MAX_FILES,
+      maxFileBytes: MAX_FILE_BYTES,
       previewByteLimit: PREVIEW_BYTE_LIMIT,
       previewCharLimit: PREVIEW_CHAR_LIMIT,
       fullContentRetained: false,
