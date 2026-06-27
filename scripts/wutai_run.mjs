@@ -9,6 +9,22 @@ const MAX_CAPTURE_CHARS = 16_000;
 const MAX_SUMMARY_CHARS = 2_000;
 const POLICY_DENIED_EXIT_CODE = 3;
 const POLICY_VERSION = "wutai-cli-policy-v0.2";
+const DEFAULT_POLICY_PROFILE = "standard";
+
+const POLICY_PROFILES = {
+  standard: {
+    profileId: "standard",
+    name: "Standard",
+    description: "Deny high-risk rules and record medium-risk rules as warnings.",
+    warningAction: "warn",
+  },
+  strict: {
+    profileId: "strict",
+    name: "Strict",
+    description: "Deny high-risk rules and escalate medium-risk warning rules to deny.",
+    warningAction: "deny",
+  },
+};
 
 function usage() {
   return `Usage:
@@ -18,6 +34,9 @@ Options:
   --output-dir <path>   Directory for generated work packets. Default: artifacts/cli
   --cwd <path>          Working directory for the wrapped command. Default: current directory
   --title <text>        Packet title
+  --policy-profile <id>
+                       Policy profile: standard or strict. Default: standard
+  --dry-run            Generate a review packet without executing the command
   --allow-high-risk     Execute even when policy preflight matches high-risk rules
   --override-reason <text>
                        Optional reason recorded when --allow-high-risk is used
@@ -38,6 +57,8 @@ function parseArgs(argv) {
     outputDir: "artifacts/cli",
     cwd: process.cwd(),
     title: null,
+    policyProfile: DEFAULT_POLICY_PROFILE,
+    dryRun: false,
     allowHighRisk: false,
     overrideReason: null,
     quiet: false,
@@ -48,8 +69,14 @@ function parseArgs(argv) {
     const arg = optionArgs[index];
     if (arg === "--help") {
       options.help = true;
+    } else if (arg === "--dry-run") {
+      options.dryRun = true;
     } else if (arg === "--allow-high-risk") {
       options.allowHighRisk = true;
+    } else if (arg === "--policy-profile") {
+      index += 1;
+      if (!optionArgs[index]) throw new Error("--policy-profile requires a value.");
+      options.policyProfile = optionArgs[index];
     } else if (arg === "--override-reason") {
       index += 1;
       if (!optionArgs[index]) throw new Error("--override-reason requires a value.");
@@ -258,15 +285,39 @@ function unique(items) {
   return [...new Set(items)];
 }
 
-function assessPolicy(command, { allowHighRisk, overrideReason }) {
+function policyProfile(profileId) {
+  const profile = POLICY_PROFILES[profileId];
+  if (!profile) {
+    throw new Error(
+      `Unknown policy profile: ${profileId}. Expected one of ${Object.keys(POLICY_PROFILES).join(", ")}.`,
+    );
+  }
+  return profile;
+}
+
+function profileRule(rule, profile) {
+  const effectiveAction =
+    rule.defaultAction === "warn" && profile.warningAction === "deny"
+      ? "deny"
+      : rule.defaultAction;
+
+  return {
+    ...rule,
+    effectiveAction,
+    profileEscalated: effectiveAction !== rule.defaultAction,
+  };
+}
+
+function assessPolicy(command, { allowHighRisk, overrideReason, profileId }) {
   const name = commandName(command);
   const args = command.slice(1);
   const context = { command, name, args };
+  const profile = policyProfile(profileId);
   const matchedRules = POLICY_RULES.filter((rule) => rule.matches(context)).map(
-    ({ matches, ...rule }) => rule,
+    ({ matches, ...rule }) => profileRule(rule, profile),
   );
-  const denyRules = matchedRules.filter((rule) => rule.defaultAction === "deny");
-  const warningRules = matchedRules.filter((rule) => rule.defaultAction === "warn");
+  const denyRules = matchedRules.filter((rule) => rule.effectiveAction === "deny");
+  const warningRules = matchedRules.filter((rule) => rule.effectiveAction === "warn");
   const overrideableDenyRules = denyRules.filter((rule) => rule.overrideable);
   const blockingDenyRules = denyRules.filter(
     (rule) => !allowHighRisk || !rule.overrideable,
@@ -283,7 +334,8 @@ function assessPolicy(command, { allowHighRisk, overrideReason }) {
   const riskProfile = {
     matchedRuleCount: matchedRules.length,
     severityCounts: countBy(matchedRules, "severity"),
-    actionCounts: countBy(matchedRules, "defaultAction"),
+    defaultActionCounts: countBy(matchedRules, "defaultAction"),
+    actionCounts: countBy(matchedRules, "effectiveAction"),
     highestSeverity: highestSeverity(matchedRules),
   };
   const decisionRationale =
@@ -308,6 +360,11 @@ function assessPolicy(command, { allowHighRisk, overrideReason }) {
     schemaVersion: 2,
     kind: "wutai.cli_policy_preflight",
     policyVersion: POLICY_VERSION,
+    profile: {
+      profileId: profile.profileId,
+      name: profile.name,
+      description: profile.description,
+    },
     engine: {
       name: "wutai_cli_policy",
       version: "0.2",
@@ -414,6 +471,7 @@ function buildManifest({
   startedAt,
   completedAt,
   exitCode,
+  executionMode,
 }) {
   const producer = {
     name: "wutai",
@@ -441,6 +499,8 @@ function buildManifest({
       completedAt,
       exitCode,
       importedTrace: false,
+      executionMode,
+      dryRun: executionMode === "dry_run",
     },
     title: task.title,
     status: task.status,
@@ -466,6 +526,8 @@ function buildManifest({
       credentialPurposes: [],
       auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
       policyDecision: policy.decision,
+      policyProfile: policy.profile.profileId,
+      executionMode,
     },
     artifacts: artifacts.map((item) => ({
       artifactId: item.artifactId,
@@ -505,6 +567,7 @@ function buildManifest({
         "session_ledger",
         "audit_trail",
         "artifact_hashes",
+        ...(executionMode === "dry_run" ? ["dry_run_review"] : []),
       ],
       blindSpots: [
         "The child process runs with the ambient permissions of the invoking shell.",
@@ -514,7 +577,8 @@ function buildManifest({
       ],
       enforcement: [
         "The wrapper avoids shell expansion by spawning argv directly.",
-        "Rule-based policy preflight denies matched high-risk commands unless --allow-high-risk is supplied.",
+        "Structured policy preflight denies matched high-risk commands unless --allow-high-risk is supplied.",
+        "Dry-run mode generates a review packet without executing the command.",
         "The explicit CLI invocation and policy decision are recorded as the approval boundary.",
         "No sandbox, credential broker, or complete destructive-command policy is implemented.",
       ],
@@ -537,6 +601,7 @@ function buildReport({
   stdoutSummary,
   stderrSummary,
   touchedFiles,
+  executionMode,
 }) {
   return `# Wutai CLI Run Packet
 
@@ -547,6 +612,8 @@ function buildReport({
 ## Policy Preflight
 
 - Decision: ${policy.decision}
+- Policy profile: ${policy.profile.profileId}
+- Execution mode: ${executionMode}
 - Highest severity: ${policy.highestSeverity}
 - Matched rules: ${policy.matchedRules.length ? policy.matchedRules.map((rule) => rule.ruleId).join(", ") : "none"}
 - Review scope: ${policy.reviewScope.length ? policy.reviewScope.join(", ") : "none"}
@@ -555,7 +622,7 @@ function buildReport({
 ## Result
 
 - Working directory: \`${commandCwd}\`
-- Exit code: ${exitCode}
+- Exit code: ${exitCode ?? "not executed"}
 - Started: ${startedAt}
 - Completed: ${completedAt}
 
@@ -568,9 +635,10 @@ function buildReport({
 ## Boundary
 
 This packet was created by the Wutai development CLI wrapper. The wrapper ran
-or denied the requested argv according to a structured but incomplete policy
-preflight. It did not sandbox the process, mediate credentials, block filesystem
-or network access, or enforce a complete destructive-command policy.
+or denied the requested argv, or generated a dry-run review, according to a
+structured but incomplete policy preflight. It did not sandbox the process,
+mediate credentials, block filesystem or network access, or enforce a complete
+destructive-command policy.
 
 ## Task
 
@@ -634,11 +702,26 @@ async function main() {
   const policy = assessPolicy(command, {
     allowHighRisk: options.allowHighRisk,
     overrideReason: options.overrideReason,
+    profileId: options.policyProfile,
   });
   const deniedByPolicy = policy.decision === "deny";
+  const executionMode = options.dryRun ? "dry_run" : "execute";
   let touchedFiles = [];
   let run;
-  if (deniedByPolicy) {
+  if (options.dryRun) {
+    const reviewedAt = new Date().toISOString();
+    run = {
+      startedAt: reviewedAt,
+      completedAt: reviewedAt,
+      exitCode: null,
+      stdout: "",
+      stderr: "Dry-run review completed. Command was not executed.",
+    };
+    if (!options.quiet) {
+      console.error("Dry-run review completed. Command was not executed.");
+      console.error(policy.summary);
+    }
+  } else if (deniedByPolicy) {
     const deniedAt = new Date().toISOString();
     run = {
       startedAt: deniedAt,
@@ -671,8 +754,12 @@ async function main() {
     command: commandText,
     argv: command,
     workingDirectory: commandCwd,
+    executionMode,
+    dryRun: options.dryRun,
   };
-  const status = deniedByPolicy
+  const status = options.dryRun
+    ? "completed_with_warnings"
+    : deniedByPolicy
     ? "cancelled"
     : run.exitCode === 0
       ? "completed"
@@ -680,18 +767,21 @@ async function main() {
   const permission = {
     requestId: `${taskId}_permission_local_script_execution`,
     taskId,
-    status: deniedByPolicy ? "denied" : "approved",
+    status: options.dryRun ? "pending" : deniedByPolicy ? "denied" : "approved",
     types: ["local_script_execution"],
     scope: [
-      "Run the requested argv through the Wutai developer CLI wrapper",
-      "Apply rule-based policy preflight before execution",
+      options.dryRun
+        ? "Review the requested argv through the Wutai developer CLI wrapper without execution"
+        : "Run the requested argv through the Wutai developer CLI wrapper",
+      "Apply structured policy preflight before execution",
+      `Policy profile: ${policy.profile.profileId}`,
       "Capture bounded stdout and stderr summaries",
       "No shell expansion",
       "No sandboxing",
       "No credential mediation",
     ],
     createdAt: run.startedAt,
-    resolvedAt: run.startedAt,
+    ...(options.dryRun ? {} : { resolvedAt: run.startedAt }),
   };
   const artifactPermission = {
     requestId: `${taskId}_permission_artifact_write`,
@@ -711,19 +801,35 @@ async function main() {
   const events = [
     event(taskId, 1, run.startedAt, "TaskStarted", "Started Wutai CLI wrapper session.", null, "user"),
     event(taskId, 2, run.startedAt, "PermissionRequested", "Declared local-script execution and policy boundary.", permission.scope.join("; "), "user"),
-    event(
-      taskId,
-      3,
-      run.startedAt,
-      "PermissionResolved",
-      deniedByPolicy
-        ? "Policy preflight denied this invocation before execution."
-        : "Policy preflight allowed this invocation.",
-      policyRecord.summary,
-      "user",
-    ),
   ];
-  if (!deniedByPolicy) {
+  if (options.dryRun) {
+    events.push(
+      event(
+        taskId,
+        3,
+        run.startedAt,
+        "HumanConfirmationNeeded",
+        "Dry-run policy review completed; execution is still pending.",
+        policyRecord.summary,
+        "user",
+      ),
+    );
+  } else {
+    events.push(
+      event(
+        taskId,
+        3,
+        run.startedAt,
+        "PermissionResolved",
+        deniedByPolicy
+          ? "Policy preflight denied this invocation before execution."
+          : "Policy preflight allowed this invocation.",
+        policyRecord.summary,
+        "user",
+      ),
+    );
+  }
+  if (!deniedByPolicy && !options.dryRun) {
     events.push(
       event(taskId, 4, run.startedAt, "ToolCallCaptured", `Started command: ${commandText}`, `Working directory: ${commandCwd}`, "expert"),
       event(taskId, 5, run.completedAt, "RuntimeEventCaptured", `Command exited with code ${run.exitCode}.`, stdoutSummary, "user"),
@@ -735,8 +841,12 @@ async function main() {
       taskId,
       events.length + 2,
       generatedAt,
-      deniedByPolicy || run.exitCode !== 0 ? "TaskFailed" : "TaskCompleted",
-      deniedByPolicy
+      options.dryRun || (!deniedByPolicy && run.exitCode === 0)
+        ? "TaskCompleted"
+        : "TaskFailed",
+      options.dryRun
+        ? "Wutai CLI wrapper dry-run review completed."
+        : deniedByPolicy
         ? "Wutai CLI wrapper session blocked by policy preflight."
         : run.exitCode === 0
           ? "Wutai CLI wrapper session completed."
@@ -747,13 +857,21 @@ async function main() {
   );
   const task = {
     taskId,
-    title: options.title ?? `CLI run: ${commandText}`,
-    userRequest: `Run and record local command: ${commandText}`,
+    title:
+      options.title ??
+      `${options.dryRun ? "CLI dry-run review" : "CLI run"}: ${commandText}`,
+    userRequest: options.dryRun
+      ? `Review local command without execution: ${commandText}`
+      : `Run and record local command: ${commandText}`,
     status,
     plan: [
       "Run policy preflight for the explicit CLI invocation.",
-      "Run the command with argv-based process spawning if policy allows it.",
-      "Capture bounded stdout, stderr, exit code, and git status delta.",
+      options.dryRun
+        ? "Generate a dry-run review packet without spawning the command."
+        : "Run the command with argv-based process spawning if policy allows it.",
+      options.dryRun
+        ? "Record policy profile, decision, review scope, and pending execution boundary."
+        : "Capture bounded stdout, stderr, exit code, and git status delta.",
       "Save manifest, report, policy, trace, ledger, and audit artifacts.",
     ],
     createdAt: run.startedAt,
@@ -773,7 +891,8 @@ async function main() {
     command: commandText,
     argv: command,
     workingDirectory: commandCwd,
-    executed: !deniedByPolicy,
+    dryRun: options.dryRun,
+    executed: !deniedByPolicy && !options.dryRun,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     exitCode: run.exitCode,
@@ -796,7 +915,8 @@ async function main() {
     permissions: [permission, artifactPermission],
     policy: policyRecord,
     events,
-    toolCalls: deniedByPolicy
+    executionMode,
+    toolCalls: deniedByPolicy || options.dryRun
       ? []
       : [
           {
@@ -811,7 +931,7 @@ async function main() {
             captureMode: "cli_wrapper",
           },
         ],
-    runtimeEvents: deniedByPolicy
+    runtimeEvents: deniedByPolicy || options.dryRun
       ? []
       : [
           {
@@ -837,6 +957,7 @@ async function main() {
       stdoutSummary,
       stderrSummary,
       touchedFiles,
+      executionMode,
     }), generatedAt),
     artifact(taskId, "policy.json", "json", JSON.stringify(policyRecord, null, 2), generatedAt),
     artifact(taskId, "trace.json", "json", JSON.stringify(trace, null, 2), generatedAt),
@@ -853,6 +974,7 @@ async function main() {
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     exitCode: run.exitCode,
+    executionMode,
   });
   const manifestArtifact = artifact(
     taskId,
@@ -872,7 +994,7 @@ async function main() {
     console.error(`Manifest: ${join(packetDir, "manifest.json")}`);
   }
 
-  return run.exitCode;
+  return options.dryRun ? 0 : run.exitCode;
 }
 
 main()

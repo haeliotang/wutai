@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,8 +65,11 @@ test("wutai_run writes a completed local-script work packet", async () => {
   assert.equal(manifest.artifacts[3].role, "session_ledger");
   assert.equal(policy.schemaVersion, 2);
   assert.equal(policy.policyVersion, "wutai-cli-policy-v0.2");
+  assert.equal(policy.profile.profileId, "standard");
   assert.equal(policy.engine.name, "wutai_cli_policy");
   assert.equal(policy.riskProfile.matchedRuleCount, 0);
+  assert.equal(policy.executionMode, "execute");
+  assert.equal(policy.dryRun, false);
   assert.equal(policy.decision, "allow");
   assert.deepEqual(policy.reviewScope, []);
   assert.equal(trace.captureMode, "cli_wrapper");
@@ -180,12 +183,98 @@ test("wutai_run records warning policy rules without blocking execution", async 
   assert.equal(policy.matchedRules[0].ruleId, "network_listener");
   assert.equal(policy.matchedRules[0].category, "network_boundary");
   assert.equal(policy.matchedRules[0].defaultAction, "warn");
+  assert.equal(policy.matchedRules[0].effectiveAction, "warn");
+  assert.equal(policy.matchedRules[0].profileEscalated, false);
   assert.equal(policy.riskProfile.actionCounts.warn, 1);
   assert.equal(policy.reviewScope.includes("local network listener"), true);
   assert.equal(manifest.audit.policyDecision, "allow_with_warnings");
   assert.equal(trace.executed, true);
   assert.match(trace.stdoutSummary, /inspect warning path/);
   assert.equal(audit.toolCalls.length, 1);
+});
+
+test("wutai_run writes a dry-run review packet without executing the command", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-dry-"));
+  const sideEffectRoot = await mkdtemp(join(tmpdir(), "wutai-run-side-effect-"));
+  const markerPath = join(sideEffectRoot, "marker.txt");
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--dry-run",
+      "--output-dir",
+      outputRoot,
+      "--",
+      process.execPath,
+      "-e",
+      `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "executed")`,
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0);
+  await assert.rejects(() => access(markerPath));
+  const { manifest, policy, trace, audit, ledger, report } =
+    await latestPacket(outputRoot);
+
+  assert.equal(policy.decision, "allow");
+  assert.equal(policy.executionMode, "dry_run");
+  assert.equal(policy.dryRun, true);
+  assert.equal(policy.profile.profileId, "standard");
+  assert.equal(manifest.status, "completed_with_warnings");
+  assert.equal(manifest.session.dryRun, true);
+  assert.equal(manifest.session.executionMode, "dry_run");
+  assert.equal(manifest.session.exitCode, null);
+  assert.equal(manifest.audit.executionMode, "dry_run");
+  assert.equal(manifest.audit.toolCallCount, 0);
+  assert.equal(trace.dryRun, true);
+  assert.equal(trace.executed, false);
+  assert.equal(trace.exitCode, null);
+  assert.equal(audit.toolCalls.length, 0);
+  assert.equal(audit.runtimeEvents.length, 0);
+  assert.equal(ledger.task.status, "completed_with_warnings");
+  assert.equal(ledger.task.permissions[0].status, "pending");
+  assert.match(report, /Execution mode: dry_run/);
+});
+
+test("wutai_run strict policy profile escalates warning rules to deny", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-strict-"));
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--policy-profile",
+      "strict",
+      "--output-dir",
+      outputRoot,
+      "--",
+      process.execPath,
+      "--inspect=0",
+      "-e",
+      "console.log('strict profile should not execute')",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 3);
+  const { manifest, policy, trace, audit, ledger } = await latestPacket(outputRoot);
+
+  assert.equal(policy.profile.profileId, "strict");
+  assert.equal(policy.decision, "deny");
+  assert.equal(policy.matchedRules[0].ruleId, "network_listener");
+  assert.equal(policy.matchedRules[0].defaultAction, "warn");
+  assert.equal(policy.matchedRules[0].effectiveAction, "deny");
+  assert.equal(policy.matchedRules[0].profileEscalated, true);
+  assert.equal(policy.riskProfile.defaultActionCounts.warn, 1);
+  assert.equal(policy.riskProfile.actionCounts.deny, 1);
+  assert.equal(manifest.status, "cancelled");
+  assert.equal(manifest.audit.policyProfile, "strict");
+  assert.equal(manifest.audit.executionMode, "execute");
+  assert.equal(trace.executed, false);
+  assert.equal(audit.toolCalls.length, 0);
+  assert.equal(ledger.task.status, "cancelled");
 });
 
 test("wutai_run records explicit high-risk override", async () => {

@@ -182,6 +182,6 @@ understand what happened after a task completes.
 6. Artifact generation.
 7. Evidence Gate and audit artifact.
 8. Development CLI wrapper and trace importer for local-script sessions.
-9. CLI wrapper policy profiles, packet provenance checks, and audit filtering.
+9. Externalized CLI policy profiles, desktop dry-run confirmation, packet provenance checks, and audit filtering.
 10. Credential broker for task-scoped provider access.
 11. Browser/computer-use adapters.

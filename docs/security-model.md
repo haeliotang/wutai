@@ -88,11 +88,15 @@ These actions must be blocked unless a specific confirmation flow exists:
 ## Local Command Boundary
 
 The v0.2 developer CLI wrapper can execute an explicitly supplied local command
-and create a work packet. Its current boundary is rule-based and incomplete:
+and create a work packet. Its current boundary is structured but incomplete:
 
 - It runs a structured but incomplete policy preflight before execution.
 - It denies matched high-risk rules by default, unless the caller passes
   `--allow-high-risk`.
+- It supports `standard` and `strict` policy profiles; strict escalates warning
+  rules to deny.
+- It supports `--dry-run`, which writes a review packet without spawning the
+  command and leaves execution permission pending.
 - It records policy rule category, severity, default action, override state,
   rationale, and review scope in `policy.json`.
 - It records argv, working directory, policy decision, exit code, bounded

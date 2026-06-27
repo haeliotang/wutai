@@ -70,8 +70,9 @@ Implemented:
   reviewable work packet without executing the command.
 - Developer CLI wrapper, `npm run wutai:run -- -- <command>`, that executes an
   explicitly provided local command, captures bounded stdout/stderr summaries,
-  runs rule-based policy preflight, records exit code and git-status delta, and
-  writes a local work packet.
+  runs structured policy preflight, supports `standard` / `strict` profiles and
+  dry-run review, records exit code and git-status delta, and writes a local
+  work packet.
 - Desktop review import for CLI wrapper packets. Select the packet directory,
   or select `manifest.json` plus sibling artifacts, to add the run to local task
   history, verify manifest artifact hashes, and inspect policy, trace, ledger,
@@ -196,7 +197,14 @@ such as shell interpreter command strings, recursive or forced remove,
 environment dumps, privilege escalation, destructive git operations, and
 recursive permission changes are denied before execution by default. Medium
 risk patterns such as dependency mutation or local network listeners are
-recorded as warnings. To record an explicit override:
+recorded as warnings. `--policy-profile strict` escalates warning rules to deny.
+To generate a packet without executing the command:
+
+```bash
+npm run wutai:run -- --dry-run --policy-profile strict -- npm install
+```
+
+To record an explicit override:
 
 ```bash
 npm run wutai:run -- --allow-high-risk \
@@ -317,8 +325,8 @@ Near-term engineering work:
 - Continue generalizing the work-packet manifest beyond research, imported
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Add configurable CLI policy profiles and stronger non-interactive dry-run
-  review.
+- Externalize CLI policy profile configuration and connect dry-run review to a
+  desktop confirmation path.
 - Extend desktop CLI packet review with stronger packet provenance checks and
   richer audit filtering.
 - Define the minimal credential-broker boundary for task-scoped provider access.
