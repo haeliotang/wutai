@@ -630,6 +630,7 @@ select:focus {
 }
 
 .dry-run-review-panel,
+.trust-verdict-panel,
 .policy-review-panel,
 .integrity-panel,
 .provenance-panel,
@@ -643,6 +644,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header h3,
+.trust-verdict-panel .panel-header h3,
 .policy-review-panel .panel-header h3,
 .integrity-panel .panel-header h3,
 .provenance-panel .panel-header h3,
@@ -653,6 +655,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header > strong,
+.trust-verdict-panel .panel-header > strong,
 .policy-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
 .provenance-panel .panel-header > strong,
@@ -665,6 +668,7 @@ select:focus {
 }
 
 .dry-run-review-panel > p,
+.trust-verdict-panel > p,
 .policy-review-panel > p,
 .integrity-panel > p,
 .provenance-panel > p {
@@ -675,6 +679,20 @@ select:focus {
 .dry-run-review-panel {
   border-color: #6f5b22;
   background: #120f07;
+}
+
+.trust-verdict-trusted {
+  border-color: #3c6a36;
+}
+
+.trust-verdict-review_required {
+  border-color: #6f5b22;
+  background: #100f09;
+}
+
+.trust-verdict-blocked {
+  border-color: #7a4a34;
+  background: #120d09;
 }
 
 .policy-review-passed {
@@ -784,6 +802,12 @@ select:focus {
   gap: 10px;
 }
 
+.trust-verdict-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
 .provenance-metrics span {
   display: grid;
   gap: 5px;
@@ -804,6 +828,16 @@ select:focus {
   font-size: 12px;
 }
 
+.trust-verdict-metrics span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  padding: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
 .provenance-metrics strong {
   color: #f4f1e8;
   font-size: 16px;
@@ -811,6 +845,12 @@ select:focus {
 }
 
 .policy-review-metrics strong {
+  color: #f4f1e8;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.trust-verdict-metrics strong {
   color: #f4f1e8;
   font-size: 16px;
   overflow-wrap: anywhere;
@@ -854,6 +894,7 @@ select:focus {
 }
 
 .policy-override-list,
+.trust-check-list,
 .policy-check-list {
   display: grid;
   gap: 8px;
@@ -868,6 +909,7 @@ select:focus {
 }
 
 .policy-override-list > div,
+.trust-check-list > div,
 .policy-check-list > div {
   display: grid;
   grid-template-columns: 132px minmax(0, 1fr);
@@ -882,6 +924,7 @@ select:focus {
 }
 
 .policy-override-list strong,
+.trust-check-list strong,
 .policy-check-list strong {
   color: #f4f1e8;
   font-size: 13px;
@@ -894,13 +937,15 @@ select:focus {
 }
 
 .policy-override-list p,
+.trust-check-list p,
 .policy-check-list p {
   margin-top: 4px;
   color: #b8b6aa;
   line-height: 1.45;
 }
 
-.policy-override-list small {
+.policy-override-list small,
+.trust-check-list small {
   display: block;
   margin-top: 4px;
   color: #9fa497;
@@ -916,6 +961,7 @@ select:focus {
 }
 
 .policy-override-list code,
+.trust-check-list code,
 .policy-check-list code,
 .cli-rule-list code {
   display: block;
@@ -956,12 +1002,28 @@ select:focus {
   overflow-wrap: anywhere;
 }
 
+.trust-verdict-status {
+  align-self: start;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
 .provenance-check-passed {
   border-color: #95e884;
   color: #95e884;
 }
 
 .policy-review-check-passed {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.trust-verdict-check-passed {
   border-color: #95e884;
   color: #95e884;
 }
@@ -976,12 +1038,22 @@ select:focus {
   color: #e7d37a;
 }
 
+.trust-verdict-check-review_required {
+  border-color: #e7d37a;
+  color: #e7d37a;
+}
+
 .provenance-check-failed {
   border-color: #ffb085;
   color: #ffb085;
 }
 
 .policy-review-check-failed {
+  border-color: #ffb085;
+  color: #ffb085;
+}
+
+.trust-verdict-check-blocked {
   border-color: #ffb085;
   color: #ffb085;
 }
@@ -1242,6 +1314,7 @@ select:focus {
   .evidence-metrics,
   .cli-review-grid,
   .dry-run-review-grid,
+  .trust-verdict-metrics,
   .policy-review-metrics,
   .integrity-metrics,
   .provenance-metrics {
@@ -1250,6 +1323,7 @@ select:focus {
 
   .cli-rule-list > div,
   .trust-key-row,
+  .trust-check-list > div,
   .policy-override-list > div,
   .policy-check-list > div,
   .integrity-check-list > div,

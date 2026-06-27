@@ -10,6 +10,11 @@ import {
   evaluateTrustedProducerKey,
   type TrustedProducerPolicy,
 } from "./trustedProducerPolicy";
+import {
+  buildTrustVerdictArtifact,
+  DEFAULT_TRUST_POLICY,
+  TRUST_VERDICT_ARTIFACT_NAME,
+} from "./trustVerdict";
 
 type CliPacketFile = Pick<File, "name" | "text"> & {
   webkitRelativePath?: string;
@@ -23,6 +28,7 @@ const INTERNAL_IMPORT_ARTIFACT_NAMES = new Set([
   INTEGRITY_ARTIFACT_NAME,
   PROVENANCE_ARTIFACT_NAME,
   POLICY_REVIEW_ARTIFACT_NAME,
+  TRUST_VERDICT_ARTIFACT_NAME,
 ]);
 const REQUIRED_CLI_PACKET_ARTIFACTS = [
   "report.md",
@@ -1141,6 +1147,18 @@ export async function importCliPacketFiles(
     new Date().toISOString(),
     contentByName,
   );
+  const policyContent = contentByName.get("policy.json");
+  const policy = policyContent ? safeJson(policyContent) : null;
+  const trustVerdict = buildTrustVerdictArtifact({
+    taskId,
+    generatedAt: new Date().toISOString(),
+    manifest,
+    policy,
+    integrity,
+    provenance,
+    policyReview,
+    trustPolicy: DEFAULT_TRUST_POLICY,
+  });
   const orderedNames = [
     ...(manifest.artifacts?.map((artifact) => artifact.name) ?? []),
     "manifest.json",
@@ -1195,7 +1213,21 @@ export async function importCliPacketFiles(
     content: JSON.stringify(policyReview, null, 2),
     createdAt: policyReview.generatedAt,
   };
-  const allArtifacts = [...artifacts, provenanceArtifact, policyReviewArtifact];
+  const trustVerdictArtifact: ArtifactRecord = {
+    artifactId: `${taskId}_artifact_trust_verdict_json`,
+    taskId,
+    type: "json",
+    name: TRUST_VERDICT_ARTIFACT_NAME,
+    virtualPath: `imported/${taskId}/${TRUST_VERDICT_ARTIFACT_NAME}`,
+    content: JSON.stringify(trustVerdict, null, 2),
+    createdAt: trustVerdict.generatedAt,
+  };
+  const allArtifacts = [
+    ...artifacts,
+    provenanceArtifact,
+    policyReviewArtifact,
+    trustVerdictArtifact,
+  ];
   const importedEvent = event(
     taskId,
     1,
@@ -1207,8 +1239,8 @@ export async function importCliPacketFiles(
     taskId,
     2,
     generatedAt,
-    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes, provenance, and policy overrides.`,
-    `${integrity.summary} ${provenance.summary} ${policyReview.summary}`,
+    `Imported ${importedArtifacts.length} CLI packet artifacts and checked manifest hashes, provenance, policy overrides, and trust verdict.`,
+    `${integrity.summary} ${provenance.summary} ${policyReview.summary} ${trustVerdict.summary}`,
   );
 
   return {
@@ -1226,6 +1258,7 @@ export async function importCliPacketFiles(
             "Import the CLI wrapper work packet.",
             "Check selected artifacts against manifest hashes and packet provenance.",
             "Review rule-level policy overrides and effective action changes.",
+            "Generate a local trust verdict for this packet.",
             "Review policy, trace, ledger, audit, manifest, and integrity artifacts.",
             "Keep this as a review-only desktop record.",
           ],

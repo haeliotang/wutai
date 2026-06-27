@@ -102,6 +102,15 @@ Implemented:
   verified signatures against an explicitly loaded or locally enrolled
   trusted-producer policy. Dry-run packets with pending execution can be marked
   approved or denied as a local review record only.
+- Trust Verdict v0.3 for imported or externally verified CLI wrapper packets.
+  Wutai combines manifest integrity, packet provenance, trusted-producer status,
+  policy override review, high-risk override rationale, and optional
+  rule-level trust policy into one `trusted`, `review_required`, or `blocked`
+  result.
+- Agent-callable packet verification with `wutai verify-packet` /
+  `npm run wutai:verify -- <packet-dir>`. The verifier emits machine-readable
+  `trust-verdict.json` and can optionally write derived review artifacts back
+  into the packet directory.
 
 Each completed research task writes a local work packet:
 
@@ -168,6 +177,8 @@ Each imported CLI wrapper packet also gets local review-side artifacts:
 ```text
 integrity.json
 provenance.json
+policy-review.json
+trust-verdict.json
 ```
 
 If a dry-run packet is approved or denied in the desktop/web review surface,
@@ -358,6 +369,61 @@ is a dry-run with pending local-script execution permission, the review panel
 can record approve or deny into `review.json`. It is review-only; the desktop UI
 does not run or re-run the command.
 
+To verify a packet from an external agent or script without opening the UI:
+
+```bash
+npm run wutai:verify -- ./artifacts/cli/<session_id>
+```
+
+or through the unified local entrypoint:
+
+```bash
+npm run wutai -- verify-packet ./artifacts/cli/<session_id>
+```
+
+The verifier prints a `wutai.trust_verdict` JSON object. Exit codes are:
+
+```text
+0   trusted
+10  review_required
+20  blocked
+2   usage or packet-read error
+```
+
+For signed packets, pass a local trusted-producer policy:
+
+```bash
+npm run wutai:verify -- \
+  --trusted-producers ./wutai-trusted-producers.json \
+  ./artifacts/cli/<session_id>
+```
+
+To apply a rule-level trust policy, pass `--trust-policy <path>`. This is
+separate from the CLI execution policy. Execution policy decides whether the
+wrapper should run a command; trust policy decides whether a produced packet can
+be accepted locally as trusted, needs review, or must be blocked. The example
+file is `config/wutai-trust-policy.example.json`:
+
+```json
+{
+  "kind": "wutai.trust_policy",
+  "requireTrustedProducerForTrusted": true,
+  "rulePolicies": {
+    "shell_interpreter_command_string": {
+      "action": "review",
+      "requireRationale": true,
+      "requireTrustedProducer": true
+    }
+  }
+}
+```
+
+To persist the verifier's derived artifacts beside the packet:
+
+```bash
+npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
+```
+
 ## Optional Real Research Adapter
 
 The real research path uses a Python sidecar and is opt-in:
@@ -425,6 +491,11 @@ Run the CLI wrapper packet tests:
 npm run test:wutai-run
 ```
 
+This includes the `verify-packet` regression matrix for trusted packets,
+unsigned packets, revoked keys, tampered artifacts, missing override rationale,
+high-risk allow, invalid policy schema, external rule-level trust policy, and
+artifact writing.
+
 Run the desktop command and IPC tests:
 
 ```bash
@@ -460,8 +531,8 @@ Near-term engineering work:
   developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Add more regression coverage and validation for externally configurable rule
-  overrides.
-- Harden local review artifacts and rule override review.
+  overrides and trust policies.
+- Package the verifier contract for external agent adapters.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:

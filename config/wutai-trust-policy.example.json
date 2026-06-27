@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.trust_policy",
+  "policyId": "local-agent-trust-policy",
+  "requireTrustedProducerForTrusted": true,
+  "defaultUnsignedAction": "review",
+  "defaultPolicyWarningAction": "review",
+  "defaultHighRiskAllowAction": "review",
+  "defaultMissingRationaleAction": "review",
+  "rulePolicies": {
+    "shell_interpreter_command_string": {
+      "action": "review",
+      "requireRationale": true,
+      "requireTrustedProducer": true,
+      "note": "Shell command strings need a rationale and a trusted producer before they can pass local trust."
+    },
+    "dependency_install_or_update": {
+      "action": "review",
+      "requireRationale": false,
+      "note": "Dependency mutations should be reviewed even when the execution policy allows them."
+    }
+  }
+}

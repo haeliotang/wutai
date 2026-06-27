@@ -224,6 +224,41 @@ interface CliPolicyReviewArtifact {
   limitation?: string;
 }
 
+interface CliTrustVerdictArtifact {
+  verdict?: "trusted" | "review_required" | "blocked";
+  summary?: string;
+  policy?: {
+    policyId?: string;
+    sourceLabel?: string;
+    matchedRulePolicyCount?: number;
+  };
+  inputs?: {
+    packetType?: string;
+    producerAdapter?: string;
+    policyDecision?: string;
+    integrityStatus?: string;
+    provenanceStatus?: string;
+    policyReviewStatus?: string;
+    trustedProducer?: boolean;
+  };
+  metrics?: {
+    total?: number;
+    passed?: number;
+    reviewRequired?: number;
+    blocked?: number;
+  };
+  checks?: Array<{
+    name?: string;
+    status?: "passed" | "review_required" | "blocked";
+    message?: string;
+    evidence?: string;
+    ruleId?: string;
+  }>;
+  reviewRequired?: string[];
+  blocked?: string[];
+  limitation?: string;
+}
+
 interface CliAuditArtifact {
   permissions?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
@@ -318,6 +353,11 @@ function policyReviewSourceLabel(value?: string) {
   if (value === "policy_profile") return "policy profile";
   if (value === "effective_action_change") return "action change";
   return "change";
+}
+
+function trustVerdictLabel(value?: string) {
+  if (value === "review_required") return "review required";
+  return value ?? "unknown";
 }
 
 function formatAuditValue(value: unknown) {
@@ -774,6 +814,13 @@ export default function App() {
     [activeTask],
   );
 
+  const trustVerdictArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "trust-verdict.json") ??
+      null,
+    [activeTask],
+  );
+
   const reviewArtifact = useMemo(
     () =>
       activeTask?.artifacts.find((item) => item.name === "review.json") ??
@@ -834,6 +881,9 @@ export default function App() {
       policyReview: policyReviewArtifact
         ? parseJsonArtifact<CliPolicyReviewArtifact>(policyReviewArtifact.content)
         : null,
+      trustVerdict: trustVerdictArtifact
+        ? parseJsonArtifact<CliTrustVerdictArtifact>(trustVerdictArtifact.content)
+        : null,
       review: reviewArtifact
         ? parseJsonArtifact<CliReviewArtifact>(reviewArtifact.content)
         : null,
@@ -847,6 +897,7 @@ export default function App() {
     provenanceArtifact,
     reviewArtifact,
     traceArtifact,
+    trustVerdictArtifact,
   ]);
 
   const localFileReview = useMemo(() => {
@@ -2247,6 +2298,73 @@ export default function App() {
                       cliPacketReview.manifest.session?.command ??
                       "Command unavailable"}
                   </p>
+                  {cliPacketReview.trustVerdict && (
+                    <div
+                      className={`trust-verdict-panel trust-verdict-${cliPacketReview.trustVerdict.verdict ?? "review_required"}`}
+                    >
+                      <div className="panel-header">
+                        <h3>Trust Verdict</h3>
+                        <strong>
+                          {trustVerdictLabel(cliPacketReview.trustVerdict.verdict)}
+                        </strong>
+                      </div>
+                      <p>
+                        {cliPacketReview.trustVerdict.summary ??
+                          "Trust verdict unavailable."}
+                      </p>
+                      <div className="trust-verdict-metrics">
+                        <span>
+                          Blocked{" "}
+                          <strong>
+                            {cliPacketReview.trustVerdict.metrics?.blocked ?? 0}
+                          </strong>
+                        </span>
+                        <span>
+                          Review{" "}
+                          <strong>
+                            {cliPacketReview.trustVerdict.metrics?.reviewRequired ??
+                              0}
+                          </strong>
+                        </span>
+                        <span>
+                          Passed{" "}
+                          <strong>
+                            {cliPacketReview.trustVerdict.metrics?.passed ?? 0}
+                          </strong>
+                        </span>
+                        <span>
+                          Producer{" "}
+                          <strong>
+                            {cliPacketReview.trustVerdict.inputs?.trustedProducer
+                              ? "trusted"
+                              : "not trusted"}
+                          </strong>
+                        </span>
+                      </div>
+                      <div className="trust-check-list">
+                        {cliPacketReview.trustVerdict.checks?.map((check, index) => (
+                          <div key={`${check.name ?? "trust_check"}_${index}`}>
+                            <span
+                              className={`trust-verdict-status trust-verdict-check-${check.status ?? "review_required"}`}
+                            >
+                              {trustVerdictLabel(check.status)}
+                            </span>
+                            <div>
+                              <strong>{check.name ?? "trust check"}</strong>
+                              <p>{check.message ?? "No trust verdict detail recorded."}</p>
+                              {check.ruleId && <small>Rule: {check.ruleId}</small>}
+                              {check.evidence && <code>{check.evidence}</code>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {cliPacketReview.trustVerdict.limitation && (
+                        <p className="muted">
+                          {cliPacketReview.trustVerdict.limitation}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {cliDryRunReview && (
                     <div className="dry-run-review-panel" aria-label="Dry-run Review">
                       <div className="panel-header">
@@ -2634,6 +2752,7 @@ export default function App() {
                       integrityArtifact,
                       provenanceArtifact,
                       policyReviewArtifact,
+                      trustVerdictArtifact,
                       reviewArtifact,
                     ]
                       .filter(Boolean)

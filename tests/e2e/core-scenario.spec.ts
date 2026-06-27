@@ -739,13 +739,22 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Download policy.json" }),
   ).toBeVisible();
-  await expect(cliReview.getByText("Manifest Integrity")).toBeVisible();
-  await expect(cliReview.getByText("Verified 5 artifact hashes from the manifest.")).toBeVisible();
+  const trustVerdictPanel = cliReview.locator(".trust-verdict-panel");
   await expect(
-    cliReview.getByRole("heading", { name: "Packet Provenance" }),
+    trustVerdictPanel.getByRole("heading", { name: "Trust Verdict" }),
+  ).toBeVisible();
+  await expect(trustVerdictPanel.locator(".panel-header > strong")).toHaveText("blocked");
+  const integrityPanel = cliReview.locator(".integrity-panel");
+  await expect(integrityPanel.getByText("Manifest Integrity")).toBeVisible();
+  await expect(
+    integrityPanel.getByText("Verified 5 artifact hashes from the manifest."),
+  ).toBeVisible();
+  const provenancePanel = cliReview.locator(".provenance-panel");
+  await expect(
+    provenancePanel.getByRole("heading", { name: "Packet Provenance" }),
   ).toBeVisible();
   await expect(
-    cliReview.getByText(
+    provenancePanel.getByText(
       "Packet provenance recorded with 1 warning; the packet is not signed or trusted.",
     ),
   ).toBeVisible();
@@ -759,6 +768,9 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download policy-review.json" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download trust-verdict.json" }),
   ).toBeVisible();
 
   const importedTask = await page.evaluate(() => {
@@ -777,6 +789,7 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     "integrity.json",
     "provenance.json",
     "policy-review.json",
+    "trust-verdict.json",
   ]);
   const integrityArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "integrity.json",
@@ -789,6 +802,12 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   expect(policyReview.status).toBe("passed");
   expect(policyReview.metrics.matchedRuleCount).toBe(1);
   expect(policyReview.metrics.ruleOverrideCount).toBe(0);
+  const trustVerdictArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  const trustVerdict = JSON.parse(trustVerdictArtifact.content);
+  expect(trustVerdict.verdict).toBe("blocked");
+  expect(trustVerdict.metrics.blocked).toBeGreaterThan(0);
   const provenanceArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "provenance.json",
   );
@@ -1024,8 +1043,16 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
 
   const cliReview = page.getByLabel("CLI Packet Review");
   await expect(cliReview).toBeVisible();
+  const provenancePanel = cliReview.locator(".provenance-panel");
+  const trustVerdictPanel = cliReview.locator(".trust-verdict-panel");
   await expect(
-    cliReview.getByText(
+    trustVerdictPanel.getByRole("heading", { name: "Trust Verdict" }),
+  ).toBeVisible();
+  await expect(
+    trustVerdictPanel.locator(".panel-header > strong"),
+  ).toHaveText("review required");
+  await expect(
+    provenancePanel.getByText(
       "Packet attestation signature verified with 1 trust warning; producer identity is not trusted.",
     ),
   ).toBeVisible();
@@ -1050,6 +1077,7 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
     "integrity.json",
     "provenance.json",
     "policy-review.json",
+    "trust-verdict.json",
   ]);
   const policyReviewArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "policy-review.json",
@@ -1057,6 +1085,12 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   const policyReview = JSON.parse(policyReviewArtifact.content);
   expect(policyReview.status).toBe("passed");
   expect(policyReview.metrics.matchedRuleCount).toBe(0);
+  const trustVerdictArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  const trustVerdict = JSON.parse(trustVerdictArtifact.content);
+  expect(trustVerdict.verdict).toBe("review_required");
+  expect(trustVerdict.inputs.trustedProducer).toBe(false);
   const provenanceArtifact = importedTask.artifacts.find(
     (item: { name: string }) => item.name === "provenance.json",
   );
@@ -1083,10 +1117,11 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   await cliReview.getByRole("button", { name: "Trust this producer key" }).click();
   await expect(page.getByText("Trusted producer key enrolled:")).toBeVisible();
   await expect(
-    cliReview.getByText(
+    provenancePanel.getByText(
       "Packet attestation signature verified and trusted producer key matched.",
     ),
   ).toBeVisible();
+  await expect(trustVerdictPanel.locator(".panel-header > strong")).toHaveText("trusted");
   await expect(
     cliReview.getByText("Trust Key wutaiRunCli", { exact: false }),
   ).toBeVisible();
@@ -1128,6 +1163,12 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   expect(trustedProvenance.attestation.trustedKey).toBe(true);
   expect(trustedProvenance.trustPolicy.status).toBe("trusted");
   expect(trustedProvenance.trustPolicy.matchedKeyId).toContain("enrolled");
+  const trustedVerdictArtifact = trustedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  const trustedVerdict = JSON.parse(trustedVerdictArtifact.content);
+  expect(trustedVerdict.verdict).toBe("trusted");
+  expect(trustedVerdict.inputs.trustedProducer).toBe(true);
   expect(
     trustedProvenance.checks.find(
       (check: { name: string }) => check.name === "trusted_key",
@@ -1137,10 +1178,11 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   await trustRegistry.getByRole("button", { name: "Revoke" }).click();
   await expect(page.getByText("Trusted producer key revoked:")).toBeVisible();
   await expect(
-    cliReview.getByText(
+    provenancePanel.getByText(
       "Packet provenance check found 1 failed check and 0 warning.",
     ),
   ).toBeVisible();
+  await expect(trustVerdictPanel.locator(".panel-header > strong")).toHaveText("blocked");
   await expect(trustRegistry.getByText("revoked", { exact: true })).toBeVisible();
   const uiRevokedTask = await page.evaluate(() => {
     const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
@@ -1159,14 +1201,19 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   expect(uiRevokedProvenance.status).toBe("failed");
   expect(uiRevokedProvenance.trustPolicy.status).toBe("revoked");
   expect(uiRevokedProvenance.attestation.trustedKey).toBe(false);
+  const uiRevokedVerdictArtifact = uiRevokedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  expect(JSON.parse(uiRevokedVerdictArtifact.content).verdict).toBe("blocked");
 
   await trustRegistry.getByRole("button", { name: "Reactivate" }).click();
   await expect(page.getByText("Trusted producer key reactivated:")).toBeVisible();
   await expect(
-    cliReview.getByText(
+    provenancePanel.getByText(
       "Packet attestation signature verified and trusted producer key matched.",
     ),
   ).toBeVisible();
+  await expect(trustVerdictPanel.locator(".panel-header > strong")).toHaveText("trusted");
   const uiReactivatedPolicy = await page.evaluate(() =>
     JSON.parse(
       window.localStorage.getItem("wutai.v0.trustedProducerPolicy") ?? "{}",
@@ -1203,6 +1250,10 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   expect(revokedProvenance.attestation.verified).toBe(true);
   expect(revokedProvenance.attestation.trustedKey).toBe(false);
   expect(revokedProvenance.trustPolicy.status).toBe("revoked");
+  const revokedVerdictArtifact = revokedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  expect(JSON.parse(revokedVerdictArtifact.content).verdict).toBe("blocked");
   expect(
     revokedProvenance.checks.find(
       (check: { name: string }) => check.name === "trusted_key",
@@ -1236,6 +1287,10 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   expect(tamperedProvenance.attestation.verified).toBe(false);
   expect(tamperedProvenance.attestation.trustedKey).toBe(false);
   expect(tamperedProvenance.trustPolicy.status).toBe("not_evaluated");
+  const tamperedVerdictArtifact = tamperedTask.artifacts.find(
+    (item: { name: string }) => item.name === "trust-verdict.json",
+  );
+  expect(JSON.parse(tamperedVerdictArtifact.content).verdict).toBe("blocked");
   expect(
     tamperedProvenance.checks.find(
       (check: { name: string }) => check.name === "attestation_subject",
@@ -1922,8 +1977,11 @@ test("flags policy override warnings for missing rationale and high-risk allow",
   await expect(
     cliReview.getByText("Rule override is missing rationale."),
   ).toBeVisible();
+  const policyCheckList = cliReview.locator(".policy-check-list");
   await expect(
-    cliReview.getByText("High-risk policy outcome allowed execution after override."),
+    policyCheckList.getByText(
+      "High-risk policy outcome allowed execution after override.",
+    ),
   ).toBeVisible();
 
   const policyReview = await page.evaluate(() => {
@@ -1940,6 +1998,17 @@ test("flags policy override warnings for missing rationale and high-risk allow",
   expect(policyReview.metrics.highRiskAllowCount).toBe(1);
   expect(policyReview.ruleOverrides[0].source).toBe("explicit_rule_override");
   expect(policyReview.ruleOverrides[0].reason).toBeUndefined();
+  const trustVerdict = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    const artifact = tasks[0].artifacts.find(
+      (item: { name: string }) => item.name === "trust-verdict.json",
+    );
+    return JSON.parse(artifact.content);
+  });
+  expect(trustVerdict.verdict).toBe("review_required");
+  expect(
+    trustVerdict.checks.some((check: { name: string }) => check.name === "high_risk_allow"),
+  ).toBe(true);
 });
 
 test("imports a CLI wrapper packet directory and flags manifest hash mismatches", async ({
