@@ -120,6 +120,9 @@ and create a work packet. Its current boundary is structured but incomplete:
 - When a packet attestation verifies but the key is unknown, the UI can enroll
   that public key hash into local trusted-producer policy for the observed
   producer adapter and packet type, then recompute `provenance.json`.
+- The local trust registry can revoke or reactivate enrolled/loaded keys and
+  export the current policy. Revoked matching keys block trusted provenance
+  until reactivated by the user.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
 - It does not identify every destructive command.

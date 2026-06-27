@@ -1090,6 +1090,16 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
   );
   expect(enrolledPolicy.keys[0].producerAdapter).toBe("wutaiRunCli");
   expect(enrolledPolicy.keys[0].allowedPacketTypes).toEqual(["local_script"]);
+  const trustRegistry = page.getByLabel("Trusted producer keys");
+  await expect(trustRegistry).toBeVisible();
+  await expect(trustRegistry.getByText("active", { exact: true })).toBeVisible();
+  await expect(
+    trustRegistry.getByText("wutaiRunCli / local_script", { exact: true }),
+  ).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export trust policy" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("wutai-trusted-producers.json");
   const trustedProvenanceArtifact = trustedTask.artifacts.find(
     (item: { name: string }) => item.name === "provenance.json",
   );
@@ -1105,6 +1115,46 @@ test("imports a signed CLI wrapper packet and evaluates trust policy states", as
       (check: { name: string }) => check.name === "trusted_key",
     ).status,
   ).toBe("passed");
+
+  await trustRegistry.getByRole("button", { name: "Revoke" }).click();
+  await expect(page.getByText("Trusted producer key revoked:")).toBeVisible();
+  await expect(
+    cliReview.getByText(
+      "Packet provenance check found 1 failed check and 0 warning.",
+    ),
+  ).toBeVisible();
+  await expect(trustRegistry.getByText("revoked", { exact: true })).toBeVisible();
+  const uiRevokedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const uiRevokedPolicy = await page.evaluate(() =>
+    JSON.parse(
+      window.localStorage.getItem("wutai.v0.trustedProducerPolicy") ?? "{}",
+    ),
+  );
+  expect(uiRevokedPolicy.keys[0].status).toBe("revoked");
+  const uiRevokedProvenanceArtifact = uiRevokedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const uiRevokedProvenance = JSON.parse(uiRevokedProvenanceArtifact.content);
+  expect(uiRevokedProvenance.status).toBe("failed");
+  expect(uiRevokedProvenance.trustPolicy.status).toBe("revoked");
+  expect(uiRevokedProvenance.attestation.trustedKey).toBe(false);
+
+  await trustRegistry.getByRole("button", { name: "Reactivate" }).click();
+  await expect(page.getByText("Trusted producer key reactivated:")).toBeVisible();
+  await expect(
+    cliReview.getByText(
+      "Packet attestation signature verified and trusted producer key matched.",
+    ),
+  ).toBeVisible();
+  const uiReactivatedPolicy = await page.evaluate(() =>
+    JSON.parse(
+      window.localStorage.getItem("wutai.v0.trustedProducerPolicy") ?? "{}",
+    ),
+  );
+  expect(uiReactivatedPolicy.keys[0].status).toBe("active");
 
   const revokedProducerPolicy = {
     ...enrolledPolicy,

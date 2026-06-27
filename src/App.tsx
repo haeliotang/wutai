@@ -40,6 +40,7 @@ import {
   EMPTY_TRUSTED_PRODUCER_POLICY,
   enrollTrustedProducerKey,
   parseTrustedProducerPolicy,
+  updateTrustedProducerKeyStatus,
   type TrustedProducerPolicy,
 } from "./runtime/trustedProducerPolicy";
 import { createTaskStore } from "./storage/createTaskStore";
@@ -840,6 +841,15 @@ export default function App() {
     () => auditRecordCount(visibleCliAuditGroups),
     [visibleCliAuditGroups],
   );
+  const trustPolicyKeyCounts = useMemo(
+    () => ({
+      active: trustedProducerPolicy.keys.filter((key) => key.status === "active")
+        .length,
+      revoked: trustedProducerPolicy.keys.filter((key) => key.status === "revoked")
+        .length,
+    }),
+    [trustedProducerPolicy],
+  );
 
   async function persist(task: WutaiTask) {
     if (!taskStore) return;
@@ -956,13 +966,39 @@ export default function App() {
     policy: TrustedProducerPolicy,
     message: string,
   ) {
-    window.localStorage.setItem(
-      TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
-      JSON.stringify(policy, null, 2),
-    );
+    if (
+      policy.keys.length === 0 &&
+      policy.policyId === EMPTY_TRUSTED_PRODUCER_POLICY.policyId
+    ) {
+      window.localStorage.removeItem(TRUSTED_PRODUCER_POLICY_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(
+        TRUSTED_PRODUCER_POLICY_STORAGE_KEY,
+        JSON.stringify(policy, null, 2),
+      );
+    }
     setTrustedProducerPolicy(policy);
     setTrustedProducerPolicyMessage(message);
     setError(null);
+  }
+
+  async function refreshActiveCliPacketWithPolicy(policy: TrustedProducerPolicy) {
+    if (!activeTask || !taskStore || !cliPacketReview) return;
+
+    const packetFiles = cliPacketArtifactsForReimport(activeTask);
+    const task = await importCliPacketFiles(packetFiles, policy);
+    await persist(task);
+  }
+
+  async function applyTrustedProducerPolicy(
+    policy: TrustedProducerPolicy,
+    message: string,
+    options: { refreshActivePacket?: boolean } = {},
+  ) {
+    saveTrustedProducerPolicyState(policy, message);
+    if (options.refreshActivePacket ?? true) {
+      await refreshActiveCliPacketWithPolicy(policy);
+    }
   }
 
   async function recheckLocalFileHashes(files: FileList | null) {
@@ -1036,7 +1072,7 @@ export default function App() {
 
     try {
       const policy = parseTrustedProducerPolicy(await file.text(), file.name);
-      saveTrustedProducerPolicyState(
+      await applyTrustedProducerPolicy(
         policy,
         `Trusted producer policy loaded: ${policy.keys.length} key${policy.keys.length === 1 ? "" : "s"}.`,
       );
@@ -1053,10 +1089,11 @@ export default function App() {
     }
   }
 
-  function clearTrustedProducerPolicy() {
-    window.localStorage.removeItem(TRUSTED_PRODUCER_POLICY_STORAGE_KEY);
-    setTrustedProducerPolicy(EMPTY_TRUSTED_PRODUCER_POLICY);
-    setTrustedProducerPolicyMessage("Trusted producer policy cleared.");
+  async function clearTrustedProducerPolicy() {
+    await applyTrustedProducerPolicy(
+      EMPTY_TRUSTED_PRODUCER_POLICY,
+      "Trusted producer policy cleared.",
+    );
   }
 
   async function importCliPacketFromFiles(files: FileList | null) {
@@ -1132,14 +1169,10 @@ export default function App() {
         note:
           "Locally enrolled from a verified packet attestation in Wutai desktop. This does not prove external identity.",
       });
-      saveTrustedProducerPolicyState(
+      await applyTrustedProducerPolicy(
         nextPolicy,
         `Trusted producer key enrolled: ${producerAdapter} ${shortHash(publicKeySha256)}.`,
       );
-
-      const packetFiles = cliPacketArtifactsForReimport(activeTask);
-      const task = await importCliPacketFiles(packetFiles, nextPolicy);
-      await persist(task);
     } catch (error) {
       setError(
         error instanceof Error
@@ -1147,6 +1180,42 @@ export default function App() {
           : "Wutai could not enroll the trusted producer key.",
       );
     }
+  }
+
+  async function updateTrustedProducerKey(
+    keyId: string,
+    status: "active" | "revoked",
+  ) {
+    try {
+      const nextPolicy = updateTrustedProducerKeyStatus(
+        trustedProducerPolicy,
+        keyId,
+        status,
+      );
+      const action = status === "revoked" ? "revoked" : "reactivated";
+      await applyTrustedProducerPolicy(
+        nextPolicy,
+        `Trusted producer key ${action}: ${keyId}.`,
+      );
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Wutai could not update the trusted producer key.",
+      );
+    }
+  }
+
+  function exportTrustedProducerPolicy() {
+    if (trustedProducerPolicy.keys.length === 0) {
+      setTrustedProducerPolicyMessage("No trusted producer policy to export.");
+      return;
+    }
+
+    downloadArtifact(
+      "wutai-trusted-producers.json",
+      JSON.stringify(trustedProducerPolicy, null, 2),
+    );
   }
 
   async function recordDryRunReview(decision: "approved" | "denied") {
@@ -1452,7 +1521,14 @@ export default function App() {
             </button>
             <button
               type="button"
-              onClick={clearTrustedProducerPolicy}
+              onClick={exportTrustedProducerPolicy}
+              disabled={trustedProducerPolicy.keys.length === 0}
+            >
+              Export trust policy
+            </button>
+            <button
+              type="button"
+              onClick={() => void clearTrustedProducerPolicy()}
               disabled={trustedProducerPolicy.keys.length === 0}
             >
               Clear trust policy
@@ -1533,11 +1609,52 @@ export default function App() {
                   : "none"}
               </strong>
             </span>
-            <span>{trustedProducerPolicy.keys.length} trusted keys</span>
+            <span>
+              {trustPolicyKeyCounts.active} active / {trustPolicyKeyCounts.revoked} revoked
+            </span>
             {trustedProducerPolicyMessage && (
               <span>{trustedProducerPolicyMessage}</span>
             )}
           </div>
+          {trustedProducerPolicy.keys.length > 0 && (
+            <section className="trust-registry" aria-label="Trusted producer keys">
+              <div className="panel-header">
+                <h2>Trusted Producer Keys</h2>
+                <strong>{trustedProducerPolicy.sourceLabel}</strong>
+              </div>
+              <div className="trust-key-list">
+                {trustedProducerPolicy.keys.map((key) => (
+                  <div className="trust-key-row" key={key.keyId}>
+                    <span
+                      className={`trust-key-status trust-key-${key.status}`}
+                    >
+                      {key.status}
+                    </span>
+                    <div>
+                      <strong>{key.label}</strong>
+                      <code>{shortHash(key.publicKeySha256)}</code>
+                      <p>
+                        {key.producerAdapter ?? "any adapter"} /{" "}
+                        {key.allowedPacketTypes?.join(", ") ?? "any packet type"}
+                      </p>
+                      {key.note && <p className="muted">{key.note}</p>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void updateTrustedProducerKey(
+                          key.keyId,
+                          key.status === "revoked" ? "active" : "revoked",
+                        )
+                      }
+                    >
+                      {key.status === "revoked" ? "Reactivate" : "Revoke"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
           {error && <p className="error-text">{error}</p>}
 
           {shouldShowResearchSetup && (

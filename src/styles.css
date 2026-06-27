@@ -235,6 +235,88 @@ select:focus {
   color: #f4f1e8;
 }
 
+.trust-registry {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  border: 1px solid #242820;
+  border-radius: 8px;
+  padding: 14px;
+  background: #07090a;
+}
+
+.trust-registry .panel-header h2 {
+  color: #f4f1e8;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.trust-registry .panel-header > strong {
+  color: #9fa497;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.trust-key-list {
+  display: grid;
+  gap: 8px;
+}
+
+.trust-key-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-top: 1px solid #20241e;
+  padding-top: 10px;
+}
+
+.trust-key-row strong {
+  display: block;
+  color: #f4f1e8;
+  font-size: 13px;
+}
+
+.trust-key-row code {
+  display: block;
+  margin-top: 4px;
+  color: #95e884;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.trust-key-row p {
+  margin-top: 4px;
+  color: #b8b6aa;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trust-key-row button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.trust-key-status {
+  align-self: start;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.trust-key-active {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.trust-key-revoked {
+  border-color: #ffb085;
+  color: #ffb085;
+}
+
 .primary-action {
   border-color: #95e884;
   color: #061005;
@@ -1055,6 +1137,7 @@ select:focus {
   }
 
   .cli-rule-list > div,
+  .trust-key-row,
   .integrity-check-list > div,
   .provenance-check-list > div,
   .audit-record dl div {

@@ -302,3 +302,32 @@ export function enrollTrustedProducerKey(
     keys: [...policy.keys, enrolledKey],
   };
 }
+
+export function updateTrustedProducerKeyStatus(
+  policy: TrustedProducerPolicy,
+  keyId: string,
+  status: TrustedProducerKey["status"],
+): TrustedProducerPolicy {
+  let matched = false;
+  const keys = policy.keys.map((key) => {
+    if (key.keyId !== keyId) return key;
+    matched = true;
+    return {
+      ...key,
+      status,
+      note:
+        status === "revoked"
+          ? "Locally revoked by the user. This blocks matching packet attestations unless reactivated."
+          : (key.note ?? "Locally reactivated by the user."),
+    };
+  });
+
+  if (!matched) {
+    throw new Error(`Trusted producer key not found: ${keyId}.`);
+  }
+
+  return {
+    ...policy,
+    keys,
+  };
+}

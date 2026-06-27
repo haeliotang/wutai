@@ -328,8 +328,9 @@ The example file is
 policy` before importing a signed packet, or import a signed packet first and
 use `Trust this producer key` after Wutai verifies the attestation signature.
 Enrollment writes a local policy entry scoped to the observed producer adapter
-and packet type, then re-checks packet provenance. A packet cannot make itself
-trusted by including its own policy; trust remains a local UI setting.
+and packet type, then re-checks packet provenance. The local trust registry can
+show, revoke, reactivate, and export trusted-producer keys. A packet cannot make
+itself trusted by including its own policy; trust remains a local UI setting.
 
 Boundary: this wrapper does not sandbox the process, mediate credentials, block
 network or filesystem access, or enforce a complete destructive-command policy.
@@ -348,10 +349,11 @@ required artifact presence, schema-kind consistency, and optional attestation
 verification. A valid attestation remains untrusted unless the public key hash
 matches the loaded or enrolled local trusted-producer policy. If the signature
 is verified but the key is unknown, the review panel can enroll the key for the
-observed producer adapter and packet type. If the packet is a dry-run with
-pending local-script execution permission, the review panel can record approve
-or deny into `review.json`. It is review-only; the desktop UI does not run or
-re-run the command.
+observed producer adapter and packet type. The trust registry can revoke or
+reactivate local keys and immediately re-check the active packet. If the packet
+is a dry-run with pending local-script execution permission, the review panel
+can record approve or deny into `review.json`. It is review-only; the desktop UI
+does not run or re-run the command.
 
 ## Optional Real Research Adapter
 
@@ -454,10 +456,9 @@ Near-term engineering work:
   local-script traces, external trace imports, local file ingestion, and
   developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Harden trusted-key revocation/edit UX for signed CLI packets.
 - Add more regression coverage and validation for externally configurable rule
   overrides.
-- Harden local review artifacts and trusted-key policy editing.
+- Harden local review artifacts and rule override review.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 
 Longer-term candidates:
