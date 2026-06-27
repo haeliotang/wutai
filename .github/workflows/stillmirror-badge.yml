@@ -1,0 +1,16 @@
+name: StillMirror badge
+on:
+  schedule: [{ cron: "0 9 * * 1" }]   # weekly (Mondays 09:00 UTC)
+  workflow_dispatch: {}                # manual trigger
+permissions:
+  contents: write                      # only to write the badge branch
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }       # full history for the review window
+      - uses: haeliotang/stillmirror-review/.github/actions/maintainer-review@stillmirror-review--v0.9.5
+        with:
+          since: "90d"
+          publish-badge: "true"
