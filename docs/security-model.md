@@ -97,6 +97,8 @@ and create a work packet. Its current boundary is structured but incomplete:
   from an explicit `--policy-config <path>`.
 - It supports `standard` and `strict` policy profiles; strict escalates warning
   rules to deny.
+- It supports rule-level overrides inside the loaded profile. Overrides can
+  strengthen or weaken individual rules and are recorded in `policy.json`.
 - It supports `--dry-run`, which writes a review packet without spawning the
   command and leaves execution permission pending.
 - The desktop/web packet review surface can record dry-run approve or deny into
@@ -124,6 +126,8 @@ and create a work packet. Its current boundary is structured but incomplete:
   trusted Wutai producer.
 - It does not implement certificate-chain validation, remote revocation checks,
   system keychain-backed trust storage, or automatic key enrollment.
+- It does not make external policy configs safe by default; a local config can
+  intentionally downgrade a rule and must be treated as trusted input.
 - It does not replace the future desktop permission broker.
 
 Any product surface that exposes command execution to non-developer users must

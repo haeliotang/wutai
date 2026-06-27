@@ -432,7 +432,7 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   ).toBe("warning");
 });
 
-test("imports a signed CLI wrapper packet and records untrusted attestation", async ({
+test("imports a signed CLI wrapper packet and evaluates trust policy states", async ({
   page,
 }) => {
   await page.goto("/");
@@ -756,6 +756,79 @@ test("imports a signed CLI wrapper packet and records untrusted attestation", as
       (check: { name: string }) => check.name === "trusted_key",
     ).status,
   ).toBe("passed");
+
+  const revokedProducerPolicy = {
+    ...trustedProducerPolicy,
+    keys: trustedProducerPolicy.keys.map((key) => ({
+      ...key,
+      status: "revoked",
+    })),
+  };
+  await page.getByLabel("Trusted producer policy").setInputFiles([
+    {
+      name: "revoked-trusted-producers.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(revokedProducerPolicy, null, 2)),
+    },
+  ]);
+  await page.getByLabel("CLI packet files").setInputFiles(packetFiles);
+
+  const revokedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const revokedProvenanceArtifact = revokedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const revokedProvenance = JSON.parse(revokedProvenanceArtifact.content);
+  expect(revokedProvenance.status).toBe("failed");
+  expect(revokedProvenance.metrics.failed).toBe(1);
+  expect(revokedProvenance.attestation.verified).toBe(true);
+  expect(revokedProvenance.attestation.trustedKey).toBe(false);
+  expect(revokedProvenance.trustPolicy.status).toBe("revoked");
+  expect(
+    revokedProvenance.checks.find(
+      (check: { name: string }) => check.name === "trusted_key",
+    ).status,
+  ).toBe("failed");
+
+  const tamperedPacketFiles = packetFiles.map((file) =>
+    file.name === "manifest.json"
+      ? {
+          ...file,
+          buffer: Buffer.from(
+            manifestContent.replace(
+              '"status": "completed"',
+              '"status": "failed"',
+            ),
+          ),
+        }
+      : file,
+  );
+  await page.getByLabel("CLI packet files").setInputFiles(tamperedPacketFiles);
+
+  const tamperedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const tamperedProvenanceArtifact = tamperedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const tamperedProvenance = JSON.parse(tamperedProvenanceArtifact.content);
+  expect(tamperedProvenance.status).toBe("failed");
+  expect(tamperedProvenance.attestation.verified).toBe(false);
+  expect(tamperedProvenance.attestation.trustedKey).toBe(false);
+  expect(tamperedProvenance.trustPolicy.status).toBe("not_evaluated");
+  expect(
+    tamperedProvenance.checks.find(
+      (check: { name: string }) => check.name === "attestation_subject",
+    ).status,
+  ).toBe("failed");
+  expect(
+    tamperedProvenance.checks.find(
+      (check: { name: string }) => check.name === "attestation_signature",
+    ).status,
+  ).toBe("failed");
 });
 
 test("records a dry-run packet review without desktop execution", async ({

@@ -215,6 +215,23 @@ environment dumps, privilege escalation, destructive git operations, and
 recursive permission changes are denied before execution by default. Medium
 risk patterns such as dependency mutation or local network listeners are
 recorded as warnings. `--policy-profile strict` escalates warning rules to deny.
+Profiles can also define rule-level overrides:
+
+```json
+{
+  "ruleOverrides": {
+    "dependency_install_or_update": {
+      "effectiveAction": "deny",
+      "severity": "high",
+      "reviewScope": ["dependency tree", "lockfile mutation"],
+      "reason": "Dependency mutation requires explicit review."
+    }
+  }
+}
+```
+
+Rule overrides are trusted local configuration. They are recorded in
+`policy.json`, can strengthen or weaken individual rules, and are not a sandbox.
 To generate a packet without executing the command:
 
 ```bash
@@ -388,7 +405,7 @@ Near-term engineering work:
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
 - Harden trusted-key enrollment and producer trust policy for signed CLI packets.
-- Move beyond profile-level policy behavior toward externally configurable rule
+- Add more regression coverage and validation for externally configurable rule
   overrides.
 - Define the minimal credential-broker boundary for task-scoped provider access.
 

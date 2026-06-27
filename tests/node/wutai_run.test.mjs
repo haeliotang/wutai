@@ -405,6 +405,84 @@ test("wutai_run loads a custom policy profile config", async () => {
   assert.equal(trace.executed, false);
 });
 
+test("wutai_run applies rule-level policy overrides from config", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-rule-override-"));
+  const configRoot = await mkdtemp(join(tmpdir(), "wutai-run-rule-config-"));
+  const configPath = join(configRoot, "profiles.json");
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        kind: "wutai.cli_policy_profile_config",
+        defaultProfile: "dependency_stop",
+        profiles: {
+          dependency_stop: {
+            profileId: "dependency_stop",
+            name: "Dependency Stop",
+            description: "Escalate dependency mutation through a rule override.",
+            warningAction: "warn",
+            ruleOverrides: {
+              dependency_install_or_update: {
+                effectiveAction: "deny",
+                severity: "high",
+                reviewScope: ["dependency tree", "lockfile mutation"],
+                reason: "Dependency mutation requires an explicit review gate.",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--policy-config",
+      configPath,
+      "--output-dir",
+      outputRoot,
+      "--",
+      "npm",
+      "install",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 3);
+  const { manifest, policy, trace } = await latestPacket(outputRoot);
+  const matchedRule = policy.matchedRules[0];
+
+  assert.equal(policy.profile.profileId, "dependency_stop");
+  assert.equal(policy.profile.ruleOverrideCount, 1);
+  assert.equal(policy.policyConfig.ruleOverrideCount, 1);
+  assert.equal(policy.decision, "deny");
+  assert.equal(policy.highestSeverity, "high");
+  assert.equal(policy.riskProfile.ruleOverrideCount, 1);
+  assert.equal(matchedRule.ruleId, "dependency_install_or_update");
+  assert.equal(matchedRule.defaultAction, "warn");
+  assert.equal(matchedRule.effectiveAction, "deny");
+  assert.equal(matchedRule.severity, "high");
+  assert.equal(matchedRule.profileEscalated, false);
+  assert.equal(matchedRule.ruleOverride.applied, true);
+  assert.equal(matchedRule.ruleOverride.baseEffectiveAction, "warn");
+  assert.equal(matchedRule.ruleOverride.effectiveAction, "deny");
+  assert.equal(
+    matchedRule.ruleOverride.reason,
+    "Dependency mutation requires an explicit review gate.",
+  );
+  assert.deepEqual(matchedRule.reviewScope, [
+    "dependency tree",
+    "lockfile mutation",
+  ]);
+  assert.equal(manifest.status, "cancelled");
+  assert.equal(trace.executed, false);
+});
+
 test("wutai_run records explicit high-risk override", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-override-"));
   const result = spawnSync(

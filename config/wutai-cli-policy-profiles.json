@@ -7,13 +7,15 @@
       "profileId": "standard",
       "name": "Standard",
       "description": "Deny high-risk rules and record medium-risk rules as warnings.",
-      "warningAction": "warn"
+      "warningAction": "warn",
+      "ruleOverrides": {}
     },
     "strict": {
       "profileId": "strict",
       "name": "Strict",
       "description": "Deny high-risk rules and escalate medium-risk warning rules to deny.",
-      "warningAction": "deny"
+      "warningAction": "deny",
+      "ruleOverrides": {}
     }
   }
 }

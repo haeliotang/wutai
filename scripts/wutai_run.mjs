@@ -32,12 +32,14 @@ const FALLBACK_POLICY_PROFILE_CONFIG = {
       name: "Standard",
       description: "Deny high-risk rules and record medium-risk rules as warnings.",
       warningAction: "warn",
+      ruleOverrides: {},
     },
     strict: {
       profileId: "strict",
       name: "Strict",
       description: "Deny high-risk rules and escalate medium-risk warning rules to deny.",
       warningAction: "deny",
+      ruleOverrides: {},
     },
   },
 };
@@ -133,6 +135,87 @@ function parseArgs(argv) {
   return { options, command };
 }
 
+function normalizeRuleOverrides(rawOverrides, sourcePath, profileId) {
+  if (rawOverrides === undefined) return {};
+  if (
+    !rawOverrides ||
+    typeof rawOverrides !== "object" ||
+    Array.isArray(rawOverrides)
+  ) {
+    throw new Error(
+      `Policy profile ${profileId} in ${sourcePath} must define ruleOverrides as an object.`,
+    );
+  }
+
+  const normalized = {};
+  for (const [ruleId, override] of Object.entries(rawOverrides)) {
+    if (!POLICY_RULES.some((rule) => rule.ruleId === ruleId)) {
+      throw new Error(
+        `Policy profile ${profileId} in ${sourcePath} overrides unknown ruleId: ${ruleId}.`,
+      );
+    }
+    if (!override || typeof override !== "object" || Array.isArray(override)) {
+      throw new Error(
+        `Policy profile ${profileId} override ${ruleId} in ${sourcePath} must be an object.`,
+      );
+    }
+
+    const effectiveAction = override.effectiveAction ?? override.action;
+    if (
+      effectiveAction !== undefined &&
+      !["allow", "warn", "deny"].includes(effectiveAction)
+    ) {
+      throw new Error(
+        `Policy profile ${profileId} override ${ruleId} in ${sourcePath} must set effectiveAction to allow, warn, or deny.`,
+      );
+    }
+    if (
+      override.severity !== undefined &&
+      !["low", "medium", "high"].includes(override.severity)
+    ) {
+      throw new Error(
+        `Policy profile ${profileId} override ${ruleId} in ${sourcePath} must set severity to low, medium, or high.`,
+      );
+    }
+    if (
+      override.overrideable !== undefined &&
+      typeof override.overrideable !== "boolean"
+    ) {
+      throw new Error(
+        `Policy profile ${profileId} override ${ruleId} in ${sourcePath} must set overrideable to a boolean.`,
+      );
+    }
+    if (
+      override.reviewScope !== undefined &&
+      (!Array.isArray(override.reviewScope) ||
+        !override.reviewScope.every((item) => typeof item === "string" && item.trim()))
+    ) {
+      throw new Error(
+        `Policy profile ${profileId} override ${ruleId} in ${sourcePath} must set reviewScope to non-empty strings.`,
+      );
+    }
+
+    normalized[ruleId] = {
+      ...(effectiveAction === undefined ? {} : { effectiveAction }),
+      ...(override.severity === undefined ? {} : { severity: override.severity }),
+      ...(override.overrideable === undefined
+        ? {}
+        : { overrideable: override.overrideable }),
+      ...(override.reviewScope === undefined
+        ? {}
+        : { reviewScope: override.reviewScope.map((item) => item.trim()) }),
+      ...(typeof override.message === "string" && override.message.trim()
+        ? { message: override.message.trim() }
+        : {}),
+      ...(typeof override.reason === "string" && override.reason.trim()
+        ? { reason: override.reason.trim() }
+        : {}),
+    };
+  }
+
+  return normalized;
+}
+
 function normalizePolicyConfig(raw, sourcePath) {
   if (!raw || typeof raw !== "object") {
     throw new Error(`Policy config ${sourcePath} must be a JSON object.`);
@@ -161,6 +244,11 @@ function normalizePolicyConfig(raw, sourcePath) {
       name: profile.name ?? profileId,
       description: profile.description ?? "No profile description provided.",
       warningAction: profile.warningAction,
+      ruleOverrides: normalizeRuleOverrides(
+        profile.ruleOverrides,
+        sourcePath,
+        profileId,
+      ),
     };
   }
 
@@ -409,15 +497,32 @@ function policyProfile(profileId, policyConfig) {
 }
 
 function profileRule(rule, profile) {
-  const effectiveAction =
+  const profileEffectiveAction =
     rule.defaultAction === "warn" && profile.warningAction === "deny"
       ? "deny"
       : rule.defaultAction;
+  const ruleOverride = profile.ruleOverrides?.[rule.ruleId] ?? null;
+  const effectiveAction = ruleOverride?.effectiveAction ?? profileEffectiveAction;
 
   return {
     ...rule,
+    severity: ruleOverride?.severity ?? rule.severity,
+    overrideable: ruleOverride?.overrideable ?? rule.overrideable,
+    message: ruleOverride?.message ?? rule.message,
+    reviewScope: ruleOverride?.reviewScope ?? rule.reviewScope,
     effectiveAction,
-    profileEscalated: effectiveAction !== rule.defaultAction,
+    profileEscalated: profileEffectiveAction !== rule.defaultAction,
+    ruleOverride: ruleOverride
+      ? {
+          applied: true,
+          source: "profile",
+          baseEffectiveAction: profileEffectiveAction,
+          effectiveAction,
+          reason: ruleOverride.reason ?? null,
+        }
+      : {
+          applied: false,
+        },
   };
 }
 
@@ -431,6 +536,9 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId, polic
   );
   const denyRules = matchedRules.filter((rule) => rule.effectiveAction === "deny");
   const warningRules = matchedRules.filter((rule) => rule.effectiveAction === "warn");
+  const ruleOverrideRules = matchedRules.filter(
+    (rule) => rule.ruleOverride?.applied,
+  );
   const overrideableDenyRules = denyRules.filter((rule) => rule.overrideable);
   const blockingDenyRules = denyRules.filter(
     (rule) => !allowHighRisk || !rule.overrideable,
@@ -450,6 +558,7 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId, polic
     defaultActionCounts: countBy(matchedRules, "defaultAction"),
     actionCounts: countBy(matchedRules, "effectiveAction"),
     highestSeverity: highestSeverity(matchedRules),
+    ruleOverrideCount: ruleOverrideRules.length,
   };
   const decisionRationale =
     decision === "deny"
@@ -467,6 +576,11 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId, polic
               `Allowed with warnings because ${warningRules.length} review rule matched.`,
               "The command still runs with the invoking shell's ambient permissions.",
             ]
+          : ruleOverrideRules.length > 0
+            ? [
+                `Allowed because ${ruleOverrideRules.length} matched rule override resolved to allow.`,
+                "Rule-level overrides are recorded in policy.json and audit.json.",
+              ]
           : ["Allowed because no policy rules matched this invocation."];
 
   return {
@@ -477,12 +591,17 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId, polic
       profileId: profile.profileId,
       name: profile.name,
       description: profile.description,
+      ruleOverrideCount: Object.keys(profile.ruleOverrides ?? {}).length,
     },
     policyConfig: {
       schemaVersion: policyConfig.schemaVersion,
       sourcePath: policyConfig.sourcePath,
       defaultProfile: policyConfig.defaultProfile,
       profileCount: Object.keys(policyConfig.profiles).length,
+      ruleOverrideCount: Object.values(policyConfig.profiles).reduce(
+        (count, item) => count + Object.keys(item.ruleOverrides ?? {}).length,
+        0,
+      ),
     },
     engine: {
       name: "wutai_cli_policy",
@@ -508,11 +627,13 @@ function assessPolicy(command, { allowHighRisk, overrideReason, profileId, polic
     summary:
       decision === "deny"
         ? "Policy preflight denied execution before the command ran."
-        : matchedRules.length
+        : warningRules.length > 0
           ? "Policy preflight allowed execution with warnings."
+          : ruleOverrideRules.length > 0
+            ? "Policy preflight allowed execution through rule-level overrides."
           : "Policy preflight allowed execution with no matched risk rules.",
     limitation:
-      "This structured rule set is intentionally incomplete and is not a sandbox, credential broker, filesystem policy, or complete shell safety policy.",
+      "This structured rule set is intentionally incomplete and is not a sandbox, credential broker, filesystem policy, or complete shell safety policy. Rule-level overrides are trusted local configuration and can weaken or strengthen individual rules.",
   };
 }
 
