@@ -1,0 +1,7 @@
+# A wedge-adopted project commits only the human attestation trail — the record
+# of who stood behind the work. Traces, ledgers, draft proposals, and the
+# regenerable maintainer-review outputs stay local and are never committed.
+/*
+!/.gitignore
+!/alignment/
+/alignment/proposals.jsonl
