@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, sign as signData } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,55 @@ function manifestArtifact(
     createdAt,
     bytes: Buffer.byteLength(content, "utf8"),
     sha256: sha256Hex(content),
+  };
+}
+
+function signedAttestation(
+  taskId: string,
+  generatedAt: string,
+  manifest: {
+    packetId?: string;
+    packetType?: string;
+    producer?: { adapter?: string };
+  },
+  manifestContent: string,
+) {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
+  const publicKeyPem = String(
+    publicKey.export({ type: "spki", format: "pem" }),
+  );
+  const signature = signData("sha256", Buffer.from(manifestContent), {
+    key: privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.packet_attestation",
+    taskId,
+    generatedAt,
+    subject: {
+      manifestSha256: sha256Hex(manifestContent),
+      manifestBytes: Buffer.byteLength(manifestContent, "utf8"),
+      packetId: manifest.packetId,
+      packetType: manifest.packetType,
+      producerAdapter: manifest.producer?.adapter,
+    },
+    signature: {
+      algorithm: "ECDSA_P256_SHA256",
+      publicKeyPem,
+      publicKeySha256: sha256Hex(publicKeyPem),
+      signatureBase64: signature.toString("base64"),
+    },
+    trust: {
+      trustedKey: false,
+      note:
+        "Signature validates the manifest against the included public key only; Wutai has no trusted key registry yet.",
+    },
+    limitation:
+      "This attestation detects manifest changes after signing. It does not prove the private key owner is trusted.",
   };
 }
 
@@ -379,6 +428,273 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
   expect(provenance.manifest.sha256).toMatch(/^[a-f0-9]{64}$/);
   expect(
     provenance.checks.find((check: { name: string }) => check.name === "trusted_signature")
+      .status,
+  ).toBe("warning");
+});
+
+test("imports a signed CLI wrapper packet and records untrusted attestation", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const generatedAt = "2026-06-27T08:20:00.000Z";
+  const taskId = "cli_signed_review";
+  const command = "node -e \"console.log('signed packet')\"";
+  const policy = {
+    schemaVersion: 2,
+    kind: "wutai.cli_policy_preflight",
+    policyVersion: "wutai-cli-policy-v0.2",
+    taskId,
+    generatedAt,
+    profile: { profileId: "standard", name: "Standard" },
+    decision: "allow",
+    highestSeverity: "low",
+    allowHighRisk: false,
+    matchedRules: [],
+    riskProfile: { matchedRuleCount: 0 },
+    reviewScope: [],
+    decisionRationale: ["Allowed because no policy rules matched this invocation."],
+    summary: "Policy preflight allowed execution with no matched risk rules.",
+    command,
+    argv: ["node", "-e", "console.log('signed packet')"],
+    workingDirectory: "/tmp/wutai",
+    executionMode: "execute",
+    dryRun: false,
+  };
+  const trace = {
+    schemaVersion: 1,
+    kind: "wutai.local_script_trace",
+    taskId,
+    generatedAt,
+    captureMode: "cli_wrapper",
+    command,
+    argv: policy.argv,
+    workingDirectory: policy.workingDirectory,
+    dryRun: false,
+    executed: true,
+    startedAt: generatedAt,
+    completedAt: generatedAt,
+    exitCode: 0,
+    stdoutSummary: "signed packet",
+    stderrSummary: "No output captured.",
+    touchedFiles: [],
+    producedArtifacts: [],
+  };
+  const events = [
+    {
+      eventId: `${taskId}_event_1`,
+      taskId,
+      timestamp: generatedAt,
+      type: "TaskStarted",
+      summary: "Started Wutai CLI wrapper session.",
+      visibility: "user",
+    },
+  ];
+  const ledger = {
+    schemaVersion: 1,
+    kind: "wutai.session_ledger",
+    generatedAt,
+    task: {
+      taskId,
+      title: "CLI run: signed packet",
+      userRequest: `Run and record local command: ${command}`,
+      status: "completed",
+      plan: ["Run policy preflight.", "Review signed imported packet."],
+      createdAt: generatedAt,
+      updatedAt: generatedAt,
+      events,
+      permissions: [],
+      sources: [],
+      artifacts: [],
+    },
+  };
+  const audit = {
+    schemaVersion: 1,
+    kind: "wutai.session_audit",
+    taskId,
+    generatedAt,
+    permissions: [],
+    policy,
+    events,
+    executionMode: "execute",
+    toolCalls: [
+      {
+        toolCallId: `${taskId}_tool_1`,
+        kind: "local_command",
+        command,
+        argv: policy.argv,
+        workingDirectory: policy.workingDirectory,
+        startedAt: generatedAt,
+        completedAt: generatedAt,
+        exitCode: 0,
+      },
+    ],
+    runtimeEvents: [
+      {
+        runtimeEventId: `${taskId}_runtime_1`,
+        type: "process_exit",
+        timestamp: generatedAt,
+        exitCode: 0,
+      },
+    ],
+    credentialGrants: [],
+  };
+  const reportContent = `# Wutai CLI Run Packet
+
+## Command
+
+\`${command}\`
+
+## Policy Preflight
+
+- Decision: allow
+`;
+  const policyContent = JSON.stringify(policy, null, 2);
+  const traceContent = JSON.stringify(trace, null, 2);
+  const ledgerContent = JSON.stringify(ledger, null, 2);
+  const auditContent = JSON.stringify(audit, null, 2);
+  const manifest = {
+    schemaVersion: 2,
+    kind: "wutai.work_packet_manifest",
+    packetId: `${taskId}_work_packet`,
+    packetType: "local_script",
+    taskId,
+    sessionId: taskId,
+    session: {
+      sessionId: taskId,
+      subject: ledger.task.title,
+      command,
+      workingDirectory: policy.workingDirectory,
+      startedAt: generatedAt,
+      completedAt: generatedAt,
+      exitCode: 0,
+      importedTrace: false,
+      executionMode: "execute",
+      dryRun: false,
+    },
+    title: ledger.task.title,
+    status: "completed",
+    userRequest: ledger.task.userRequest,
+    generatedAt,
+    producer: {
+      name: "wutai",
+      adapter: "wutaiRunCli",
+      runtime: "node child_process spawn",
+    },
+    permissions: [],
+    audit: {
+      eventCount: 1,
+      eventTypeCounts: { TaskStarted: 1 },
+      permissionDecisionCount: 0,
+      toolCallCount: 1,
+      runtimeEventCount: 1,
+      credentialPurposes: [],
+      auditArtifacts: ["policy.json", "ledger.json", "audit.json"],
+      policyDecision: "allow",
+      policyProfile: "standard",
+      executionMode: "execute",
+    },
+    artifacts: [
+      manifestArtifact("report.md", "markdown", reportContent, generatedAt),
+      manifestArtifact("policy.json", "json", policyContent, generatedAt),
+      manifestArtifact("trace.json", "json", traceContent, generatedAt),
+      manifestArtifact("ledger.json", "json", ledgerContent, generatedAt),
+      manifestArtifact("audit.json", "json", auditContent, generatedAt),
+    ],
+    evidence: { status: "not_available", readyForTrust: false },
+    coverage: { captured: [], blindSpots: [], enforcement: [] },
+    humanReview: { attestation: "not_recorded" },
+  };
+  const manifestContent = JSON.stringify(manifest, null, 2);
+  const attestationContent = JSON.stringify(
+    signedAttestation(taskId, generatedAt, manifest, manifestContent),
+    null,
+    2,
+  );
+
+  await page.getByLabel("CLI packet files").setInputFiles([
+    {
+      name: "manifest.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(manifestContent),
+    },
+    {
+      name: "attestation.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(attestationContent),
+    },
+    {
+      name: "report.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from(reportContent),
+    },
+    {
+      name: "policy.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(policyContent),
+    },
+    {
+      name: "trace.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(traceContent),
+    },
+    {
+      name: "ledger.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(ledgerContent),
+    },
+    {
+      name: "audit.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(auditContent),
+    },
+  ]);
+
+  const cliReview = page.getByLabel("CLI Packet Review");
+  await expect(cliReview).toBeVisible();
+  await expect(
+    cliReview.getByText(
+      "Packet attestation signature verified with 1 trust warning; producer identity is not trusted.",
+    ),
+  ).toBeVisible();
+  await expect(
+    cliReview.getByText("Attestation verified", { exact: true }),
+  ).toBeVisible();
+  await expect(cliReview.getByText("attestation_signature")).toBeVisible();
+  await expect(cliReview.getByText("trusted_key")).toBeVisible();
+
+  const importedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  expect(importedTask.artifacts.map((item: { name: string }) => item.name)).toEqual([
+    "report.md",
+    "policy.json",
+    "trace.json",
+    "ledger.json",
+    "audit.json",
+    "manifest.json",
+    "attestation.json",
+    "integrity.json",
+    "provenance.json",
+  ]);
+  const provenanceArtifact = importedTask.artifacts.find(
+    (item: { name: string }) => item.name === "provenance.json",
+  );
+  const provenance = JSON.parse(provenanceArtifact.content);
+  expect(provenance.status).toBe("warning");
+  expect(provenance.metrics.warnings).toBe(1);
+  expect(provenance.metrics.failed).toBe(0);
+  expect(provenance.attestation.present).toBe(true);
+  expect(provenance.attestation.verified).toBe(true);
+  expect(provenance.attestation.trustedKey).toBe(false);
+  expect(
+    provenance.checks.find(
+      (check: { name: string }) => check.name === "attestation_signature",
+    ).status,
+  ).toBe("passed");
+  expect(
+    provenance.checks.find((check: { name: string }) => check.name === "trusted_key")
       .status,
   ).toBe("warning");
 });

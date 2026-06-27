@@ -101,6 +101,13 @@ interface CliProvenanceArtifact {
     producerAdapter?: string;
     producerRuntime?: string;
   };
+  attestation?: {
+    present?: boolean;
+    verified?: boolean;
+    trustedKey?: boolean;
+    algorithm?: string;
+    publicKeySha256?: string;
+  };
   metrics?: {
     total?: number;
     passed?: number;
@@ -1750,6 +1757,16 @@ export default function App() {
                           <strong>
                             {cliPacketReview.provenance.manifest?.producerAdapter ??
                               "unknown"}
+                          </strong>
+                        </span>
+                        <span>
+                          Attestation{" "}
+                          <strong>
+                            {cliPacketReview.provenance.attestation?.verified
+                              ? "verified"
+                              : cliPacketReview.provenance.attestation?.present
+                                ? "failed"
+                                : "missing"}
                           </strong>
                         </span>
                         <span>

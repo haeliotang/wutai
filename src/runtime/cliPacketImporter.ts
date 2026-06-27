@@ -12,6 +12,7 @@ type CliPacketFile = Pick<File, "name" | "text"> & {
 
 const INTEGRITY_ARTIFACT_NAME = "integrity.json";
 const PROVENANCE_ARTIFACT_NAME = "provenance.json";
+const ATTESTATION_ARTIFACT_NAME = "attestation.json";
 const INTERNAL_IMPORT_ARTIFACT_NAMES = new Set([
   INTEGRITY_ARTIFACT_NAME,
   PROVENANCE_ARTIFACT_NAME,
@@ -58,6 +59,31 @@ interface WorkPacketManifest {
     startedAt?: string;
     completedAt?: string;
   };
+}
+
+interface PacketAttestation {
+  schemaVersion?: number;
+  kind?: string;
+  taskId?: string;
+  generatedAt?: string;
+  subject?: {
+    manifestSha256?: string;
+    manifestBytes?: number;
+    packetId?: string;
+    packetType?: string;
+    producerAdapter?: string;
+  };
+  signature?: {
+    algorithm?: string;
+    publicKeyPem?: string;
+    publicKeySha256?: string;
+    signatureBase64?: string;
+  };
+  trust?: {
+    trustedKey?: boolean;
+    note?: string;
+  };
+  limitation?: string;
 }
 
 interface LedgerArtifact {
@@ -123,6 +149,13 @@ interface PacketProvenanceArtifact {
     producerAdapter?: string;
     producerRuntime?: string;
   };
+  attestation: {
+    present: boolean;
+    verified: boolean;
+    trustedKey: boolean;
+    algorithm?: string;
+    publicKeySha256?: string;
+  };
   metrics: {
     total: number;
     passed: number;
@@ -178,6 +211,80 @@ function safeJson(content: string): Record<string, unknown> | null {
       : null;
   } catch {
     return null;
+  }
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function publicKeyPemToBytes(pem: string): Uint8Array {
+  const base64 = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/g, "")
+    .replace(/-----END PUBLIC KEY-----/g, "")
+    .replace(/\s/g, "");
+  if (!base64) {
+    throw new Error("Public key PEM is empty.");
+  }
+  return base64ToBytes(base64);
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+async function verifyAttestationSignature(
+  attestation: PacketAttestation,
+  manifestContent: string,
+): Promise<{ verified: boolean; message: string }> {
+  const signature = attestation.signature;
+  if (signature?.algorithm !== "ECDSA_P256_SHA256") {
+    return {
+      verified: false,
+      message: `Unsupported attestation signature algorithm: ${String(signature?.algorithm ?? "missing")}.`,
+    };
+  }
+  if (!signature.publicKeyPem || !signature.signatureBase64) {
+    return {
+      verified: false,
+      message: "Attestation signature is missing publicKeyPem or signatureBase64.",
+    };
+  }
+
+  try {
+    const key = await crypto.subtle.importKey(
+      "spki",
+      toArrayBuffer(publicKeyPemToBytes(signature.publicKeyPem)),
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"],
+    );
+    const verified = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      key,
+      toArrayBuffer(base64ToBytes(signature.signatureBase64)),
+      new TextEncoder().encode(manifestContent),
+    );
+    return {
+      verified,
+      message: verified
+        ? "Attestation signature verifies the selected manifest bytes."
+        : "Attestation signature does not verify the selected manifest bytes.",
+    };
+  } catch (error) {
+    return {
+      verified: false,
+      message: `Could not verify attestation signature: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
   }
 }
 
@@ -277,6 +384,13 @@ async function buildProvenanceArtifact(
   contentByName: Map<string, string>,
   importMode: "directory" | "files",
 ): Promise<PacketProvenanceArtifact> {
+  const manifestSha256 = await sha256Hex(manifestContent);
+  const manifestBytes = byteLength(manifestContent);
+  let attestation: PacketProvenanceArtifact["attestation"] = {
+    present: false,
+    verified: false,
+    trustedKey: false,
+  };
   const checks: ProvenanceCheck[] = [
     {
       name: "manifest.json",
@@ -288,7 +402,7 @@ async function buildProvenanceArtifact(
       name: "manifest_sha256",
       status: "passed",
       message: "Recorded the selected manifest byte hash for local provenance.",
-      evidence: await sha256Hex(manifestContent),
+      evidence: manifestSha256,
     },
   ];
 
@@ -354,18 +468,100 @@ async function buildProvenanceArtifact(
     });
   }
 
-  const signed =
-    "signature" in manifest ||
-    "signatures" in manifest ||
-    "attestation" in manifest ||
-    "attestations" in manifest;
-  checks.push({
-    name: "trusted_signature",
-    status: signed ? "passed" : "warning",
-    message: signed
-      ? "Manifest contains a signature or attestation field."
-      : "No manifest signature or trusted producer attestation was selected.",
-  });
+  const attestationContent = contentByName.get(ATTESTATION_ARTIFACT_NAME);
+  if (!attestationContent) {
+    checks.push({
+      name: "trusted_signature",
+      status: "warning",
+      message: "No manifest signature or trusted producer attestation was selected.",
+    });
+  } else {
+    attestation = {
+      present: true,
+      verified: false,
+      trustedKey: false,
+    };
+    const parsed = safeJson(attestationContent) as PacketAttestation | null;
+    if (!parsed) {
+      checks.push({
+        name: ATTESTATION_ARTIFACT_NAME,
+        status: "failed",
+        message: "attestation.json is not a JSON object.",
+      });
+    } else {
+      const algorithm = parsed.signature?.algorithm;
+      const publicKeyPem = parsed.signature?.publicKeyPem;
+      const publicKeySha256 = publicKeyPem
+        ? await sha256Hex(publicKeyPem)
+        : undefined;
+      const claimedPublicKeySha256 = parsed.signature?.publicKeySha256;
+      const kindMatches = parsed.kind === "wutai.packet_attestation";
+      const subjectMatches =
+        parsed.subject?.manifestSha256 === manifestSha256 &&
+        parsed.subject?.manifestBytes === manifestBytes &&
+        (!parsed.taskId || parsed.taskId === taskId);
+      const publicKeyMatches =
+        Boolean(publicKeyPem) &&
+        Boolean(claimedPublicKeySha256) &&
+        claimedPublicKeySha256 === publicKeySha256;
+      attestation = {
+        present: true,
+        verified: false,
+        trustedKey: false,
+        algorithm,
+        publicKeySha256: claimedPublicKeySha256,
+      };
+      checks.push({
+        name: ATTESTATION_ARTIFACT_NAME,
+        status: kindMatches ? "passed" : "failed",
+        message: kindMatches
+          ? "Attestation schema kind matches the Wutai packet attestation contract."
+          : `Attestation schema kind mismatch: expected wutai.packet_attestation, got ${String(parsed.kind ?? "missing")}.`,
+        evidence: `kind=${String(parsed.kind ?? "missing")} taskId=${String(parsed.taskId ?? "missing")}`,
+      });
+      checks.push({
+        name: "attestation_subject",
+        status: subjectMatches ? "passed" : "failed",
+        message: subjectMatches
+          ? "Attestation subject matches the selected manifest hash, byte count, and task id."
+          : "Attestation subject does not match the selected manifest hash, byte count, or task id.",
+        evidence: `subjectManifestSha256=${String(parsed.subject?.manifestSha256 ?? "missing")} selectedManifestSha256=${manifestSha256}`,
+      });
+      checks.push({
+        name: "attestation_public_key",
+        status: publicKeyMatches ? "passed" : "failed",
+        message: publicKeyMatches
+          ? "Attestation public key hash matches the embedded public key."
+          : "Attestation public key hash does not match the embedded public key.",
+        evidence: `claimed=${String(claimedPublicKeySha256 ?? "missing")} actual=${String(publicKeySha256 ?? "missing")}`,
+      });
+
+      const signatureResult =
+        kindMatches && subjectMatches && publicKeyMatches
+          ? await verifyAttestationSignature(parsed, manifestContent)
+          : {
+              verified: false,
+              message:
+                "Skipped signature verification because attestation schema, subject, or public key hash failed.",
+            };
+      attestation.verified = signatureResult.verified;
+      checks.push({
+        name: "attestation_signature",
+        status: signatureResult.verified ? "passed" : "failed",
+        message: signatureResult.message,
+        evidence: `algorithm=${String(algorithm ?? "missing")}`,
+      });
+      if (signatureResult.verified) {
+        checks.push({
+          name: "trusted_key",
+          status: "warning",
+          message:
+            "The attestation signature is valid, but Wutai has no trusted-key registry for producer identity yet.",
+          evidence: `publicKeySha256=${String(claimedPublicKeySha256 ?? "missing")}`,
+        });
+      }
+    }
+  }
 
   const metrics = {
     total: checks.length,
@@ -386,12 +582,14 @@ async function buildProvenanceArtifact(
     summary:
       status === "failed"
         ? `Packet provenance check found ${metrics.failed} failed check and ${metrics.warnings} warning.`
-        : status === "warning"
+        : status === "warning" && attestation.verified
+          ? `Packet attestation signature verified with ${metrics.warnings} trust warning; producer identity is not trusted.`
+          : status === "warning"
           ? `Packet provenance recorded with ${metrics.warnings} warning; the packet is not signed or trusted.`
           : "Packet provenance checks passed for the selected CLI wrapper packet.",
     manifest: {
-      sha256: await sha256Hex(manifestContent),
-      bytes: byteLength(manifestContent),
+      sha256: manifestSha256,
+      bytes: manifestBytes,
       kind: manifest.kind,
       schemaVersion: manifest.schemaVersion,
       packetId: manifest.packetId,
@@ -403,10 +601,11 @@ async function buildProvenanceArtifact(
       producerAdapter: manifest.producer?.adapter,
       producerRuntime: manifest.producer?.runtime,
     },
+    attestation,
     metrics,
     checks,
     limitation:
-      "This records selected packet provenance and schema consistency. It does not prove the manifest was signed, produced by a trusted runtime, or unmodified before selection.",
+      "This records selected packet provenance, schema consistency, and optional attestation signature validity. It does not prove the producer key is trusted, the signing key was protected, or the command ran in a sandbox.",
   };
 }
 

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { access, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,19 +10,44 @@ import test from "node:test";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const wrapperPath = join(repoRoot, "scripts", "wutai_run.mjs");
 
+function sha256Hex(content) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+async function readOptionalJson(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function latestPacket(outputRoot) {
   const entries = await readdir(outputRoot);
   assert.equal(entries.length, 1);
   const packetDir = join(outputRoot, entries[0]);
-  const manifest = JSON.parse(
-    await readFile(join(packetDir, "manifest.json"), "utf8"),
-  );
+  const manifestContent = await readFile(join(packetDir, "manifest.json"), "utf8");
+  const manifest = JSON.parse(manifestContent);
   const policy = JSON.parse(await readFile(join(packetDir, "policy.json"), "utf8"));
   const trace = JSON.parse(await readFile(join(packetDir, "trace.json"), "utf8"));
   const audit = JSON.parse(await readFile(join(packetDir, "audit.json"), "utf8"));
   const ledger = JSON.parse(await readFile(join(packetDir, "ledger.json"), "utf8"));
   const report = await readFile(join(packetDir, "report.md"), "utf8");
-  return { packetDir, manifest, policy, trace, audit, ledger, report };
+  const attestation = await readOptionalJson(join(packetDir, "attestation.json"));
+  return {
+    packetDir,
+    manifest,
+    manifestContent,
+    policy,
+    trace,
+    audit,
+    ledger,
+    report,
+    attestation,
+  };
 }
 
 test("wutai_run writes a completed local-script work packet", async () => {
@@ -82,6 +108,51 @@ test("wutai_run writes a completed local-script work packet", async () => {
   assert.equal(audit.runtimeEvents[0].exitCode, 0);
   assert.equal(ledger.task.status, "completed");
   assert.match(report, /Wutai CLI Run Packet/);
+});
+
+test("wutai_run writes an optional signed packet attestation", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-run-signed-"));
+  const keyRoot = await mkdtemp(join(tmpdir(), "wutai-run-key-"));
+  const signingKeyPath = join(keyRoot, "signing-key.pem");
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  await writeFile(
+    signingKeyPath,
+    privateKey.export({ type: "pkcs8", format: "pem" }),
+    "utf8",
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      wrapperPath,
+      "--quiet",
+      "--signing-key",
+      signingKeyPath,
+      "--output-dir",
+      outputRoot,
+      "--",
+      process.execPath,
+      "-e",
+      "console.log('signed packet')",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0);
+  const { manifest, manifestContent, attestation } =
+    await latestPacket(outputRoot);
+
+  assert.ok(attestation);
+  assert.equal(attestation.kind, "wutai.packet_attestation");
+  assert.equal(attestation.taskId, manifest.taskId);
+  assert.equal(attestation.subject.manifestSha256, sha256Hex(manifestContent));
+  assert.equal(attestation.subject.manifestBytes, Buffer.byteLength(manifestContent));
+  assert.equal(attestation.subject.packetId, manifest.packetId);
+  assert.equal(attestation.signature.algorithm, "ECDSA_P256_SHA256");
+  assert.match(attestation.signature.publicKeySha256, /^[a-f0-9]{64}$/);
+  assert.match(attestation.signature.signatureBase64, /^[A-Za-z0-9+/]+=*$/);
+  assert.equal(attestation.trust.trustedKey, false);
+  assert.match(attestation.limitation, /does not prove/);
 });
 
 test("wutai_run writes a failed packet and preserves the child exit code", async () => {

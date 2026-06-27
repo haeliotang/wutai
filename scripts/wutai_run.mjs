@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign as signData,
+} from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +16,7 @@ const MAX_SUMMARY_CHARS = 2_000;
 const POLICY_DENIED_EXIT_CODE = 3;
 const POLICY_VERSION = "wutai-cli-policy-v0.2";
 const DEFAULT_POLICY_PROFILE = "standard";
+const ATTESTATION_ARTIFACT_NAME = "attestation.json";
 const DEFAULT_POLICY_CONFIG_URL = new URL(
   "../config/wutai-cli-policy-profiles.json",
   import.meta.url,
@@ -52,6 +58,8 @@ Options:
   --allow-high-risk     Execute even when policy preflight matches high-risk rules
   --override-reason <text>
                        Optional reason recorded when --allow-high-risk is used
+  --signing-key <path>
+                       Optional EC P-256 private key PEM used to sign manifest.json
   --quiet               Do not mirror child stdout/stderr while running
   --help                Show this message
 
@@ -74,6 +82,7 @@ function parseArgs(argv) {
     dryRun: false,
     allowHighRisk: false,
     overrideReason: null,
+    signingKey: null,
     quiet: false,
     help: false,
   };
@@ -98,6 +107,10 @@ function parseArgs(argv) {
       index += 1;
       if (!optionArgs[index]) throw new Error("--override-reason requires a value.");
       options.overrideReason = optionArgs[index];
+    } else if (arg === "--signing-key") {
+      index += 1;
+      if (!optionArgs[index]) throw new Error("--signing-key requires a value.");
+      options.signingKey = optionArgs[index];
     } else if (arg === "--quiet") {
       options.quiet = true;
     } else if (arg === "--output-dir") {
@@ -507,6 +520,62 @@ function sha256Hex(content) {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+async function buildPacketAttestation({
+  taskId,
+  generatedAt,
+  manifest,
+  manifestContent,
+  signingKeyPath,
+}) {
+  const resolvedKeyPath = resolve(signingKeyPath);
+  const privateKey = createPrivateKey(await readFile(resolvedKeyPath, "utf8"));
+  const namedCurve = privateKey.asymmetricKeyDetails?.namedCurve;
+  if (
+    privateKey.asymmetricKeyType !== "ec" ||
+    !["prime256v1", "P-256"].includes(namedCurve)
+  ) {
+    throw new Error(
+      "--signing-key must point to an EC P-256 private key PEM.",
+    );
+  }
+
+  const publicKey = createPublicKey(privateKey);
+  const publicKeyPem = String(
+    publicKey.export({ type: "spki", format: "pem" }),
+  );
+  const signature = signData("sha256", Buffer.from(manifestContent, "utf8"), {
+    key: privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
+
+  return {
+    schemaVersion: 1,
+    kind: "wutai.packet_attestation",
+    taskId,
+    generatedAt,
+    subject: {
+      manifestSha256: sha256Hex(manifestContent),
+      manifestBytes: Buffer.byteLength(manifestContent, "utf8"),
+      packetId: manifest.packetId,
+      packetType: manifest.packetType,
+      producerAdapter: manifest.producer?.adapter,
+    },
+    signature: {
+      algorithm: "ECDSA_P256_SHA256",
+      publicKeyPem,
+      publicKeySha256: sha256Hex(publicKeyPem),
+      signatureBase64: signature.toString("base64"),
+    },
+    trust: {
+      trustedKey: false,
+      note:
+        "Signature validates the manifest against the included public key only; Wutai has no trusted key registry yet.",
+    },
+    limitation:
+      "This attestation detects manifest changes after signing. It does not prove the private key owner is trusted, protect the signing key, or sandbox the command.",
+  };
+}
+
 function gitStatus(cwd) {
   const result = spawnSync("git", ["status", "--porcelain"], {
     cwd,
@@ -899,7 +968,7 @@ async function main() {
     types: ["artifact_write"],
     scope: [
       "Write a new local work packet",
-      "Write policy, trace, ledger, audit, report, and manifest artifacts",
+      "Write policy, trace, ledger, audit, report, manifest, and optional attestation artifacts",
       "Do not modify existing work packets",
     ],
     createdAt: run.startedAt,
@@ -945,7 +1014,17 @@ async function main() {
     );
   }
   events.push(
-    event(taskId, events.length + 1, generatedAt, "ArtifactCreated", "Saved manifest, report, policy, trace, ledger, and audit artifacts.", null, "user"),
+    event(
+      taskId,
+      events.length + 1,
+      generatedAt,
+      "ArtifactCreated",
+      options.signingKey
+        ? "Saved manifest, report, policy, trace, ledger, audit, and attestation artifacts."
+        : "Saved manifest, report, policy, trace, ledger, and audit artifacts.",
+      null,
+      "user",
+    ),
     event(
       taskId,
       events.length + 2,
@@ -981,7 +1060,9 @@ async function main() {
       options.dryRun
         ? "Record policy profile, decision, review scope, and pending execution boundary."
         : "Capture bounded stdout, stderr, exit code, and git status delta.",
-      "Save manifest, report, policy, trace, ledger, and audit artifacts.",
+      options.signingKey
+        ? "Save manifest, report, policy, trace, ledger, audit, and attestation artifacts."
+        : "Save manifest, report, policy, trace, ledger, and audit artifacts.",
     ],
     createdAt: run.startedAt,
     updatedAt: generatedAt,
@@ -1092,15 +1173,41 @@ async function main() {
     JSON.stringify(manifest, null, 2),
     generatedAt,
   );
+  const attestationArtifact = options.signingKey
+    ? artifact(
+        taskId,
+        ATTESTATION_ARTIFACT_NAME,
+        "json",
+        JSON.stringify(
+          await buildPacketAttestation({
+            taskId,
+            generatedAt,
+            manifest,
+            manifestContent: manifestArtifact.content,
+            signingKeyPath: options.signingKey,
+          }),
+          null,
+          2,
+        ),
+        generatedAt,
+      )
+    : null;
   const packetDir = join(outputRoot, taskId);
   await mkdir(packetDir, { recursive: true });
-  for (const item of [...artifacts, manifestArtifact]) {
+  for (const item of [
+    ...artifacts,
+    manifestArtifact,
+    ...(attestationArtifact ? [attestationArtifact] : []),
+  ]) {
     await writeFile(join(packetDir, item.name), item.content, "utf8");
   }
 
   if (!options.quiet) {
     console.error(`\nWutai work packet: ${packetDir}`);
     console.error(`Manifest: ${join(packetDir, "manifest.json")}`);
+    if (attestationArtifact) {
+      console.error(`Attestation: ${join(packetDir, ATTESTATION_ARTIFACT_NAME)}`);
+    }
   }
 
   return options.dryRun ? 0 : run.exitCode;

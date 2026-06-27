@@ -72,13 +72,16 @@ Implemented:
   explicitly provided local command, captures bounded stdout/stderr summaries,
   runs structured policy preflight from `config/wutai-cli-policy-profiles.json`,
   supports `standard` / `strict` profiles and dry-run review, records exit code
-  and git-status delta, and writes a local work packet.
+  and git-status delta, and writes a local work packet. With
+  `--signing-key <pem>`, it also writes an optional `attestation.json` that
+  signs the final `manifest.json`.
 - Desktop review import for CLI wrapper packets. Select the packet directory,
   or select `manifest.json` plus sibling artifacts, to add the run to local task
   history, verify manifest artifact hashes, record local provenance checks,
   inspect policy, trace, ledger, filtered audit details, integrity, and
-  provenance artifacts. Dry-run packets with pending execution can be marked
-  approved or denied as a local review record only.
+  provenance artifacts, and verify optional packet attestation signatures.
+  Dry-run packets with pending execution can be marked approved or denied as a
+  local review record only.
 
 Each completed research task writes a local work packet:
 
@@ -109,6 +112,7 @@ policy.json
 trace.json
 ledger.json
 audit.json
+attestation.json   # optional, only when --signing-key is supplied
 ```
 
 Each imported CLI wrapper packet also gets local review-side artifacts:
@@ -223,6 +227,20 @@ npm run wutai:run -- --allow-high-risk \
   --override-reason "reviewed shell boundary" -- sh -c "printf reviewed"
 ```
 
+To add a packet attestation, provide an EC P-256 private key:
+
+```bash
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+  -out wutai-signing-key.pem
+npm run wutai:run -- --signing-key ./wutai-signing-key.pem -- npm run test:evidence
+```
+
+This writes `attestation.json` beside the packet. The attestation signs the
+final `manifest.json` bytes with ECDSA P-256 SHA-256 and includes the public key
+needed for verification. This is a tamper check, not a trust guarantee: Wutai
+does not yet have a trusted-key registry, key enrollment flow, or producer
+identity policy.
+
 Boundary: this wrapper does not sandbox the process, mediate credentials, block
 network or filesystem access, or enforce a complete destructive-command policy.
 The policy catalog records rule category, severity, default action, override
@@ -232,12 +250,13 @@ a full permission broker.
 To review a generated packet in the app, open the web preview or Tauri shell and
 choose `Import CLI packet directory`. The file-based fallback is `Import CLI
 packet files`, then select `manifest.json`, `report.md`, `policy.json`,
-`trace.json`, `ledger.json`, and `audit.json` from the packet directory. The
-import recomputes selected artifact SHA-256 values against the manifest and
-writes `integrity.json` and `provenance.json` into local task history. The
-provenance check records manifest hash, producer fields, required artifact
-presence, schema-kind consistency, and whether a signature/attestation is
-present; it does not prove trusted origin. If the packet is a dry-run with
+`trace.json`, `ledger.json`, `audit.json`, and optional `attestation.json` from
+the packet directory. The import recomputes selected artifact SHA-256 values
+against the manifest and writes `integrity.json` and `provenance.json` into
+local task history. The provenance check records manifest hash, producer fields,
+required artifact presence, schema-kind consistency, and optional attestation
+verification. A valid attestation still remains untrusted until Wutai can bind
+the public key to a trusted producer policy. If the packet is a dry-run with
 pending local-script execution permission, the review panel can record approve or
 deny into `review.json`. It is review-only; the desktop UI does not run or re-run
 the command.
@@ -342,7 +361,7 @@ Near-term engineering work:
 - Continue generalizing the work-packet manifest beyond research, imported
   local-script traces, and developer CLI wrapper runs.
 - Add an official-source-first research pass before final Evidence Gate review.
-- Add signed packet provenance or trusted producer attestation for CLI packets.
+- Add trusted-key enrollment and producer trust policy for signed CLI packets.
 - Move beyond profile-level policy behavior toward externally configurable rule
   overrides.
 - Define the minimal credential-broker boundary for task-scoped provider access.

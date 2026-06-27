@@ -107,15 +107,21 @@ and create a work packet. Its current boundary is structured but incomplete:
 - It records argv, working directory, policy decision, exit code, bounded
   stdout/stderr summaries, git-status delta, session ledger, audit trail, and
   artifact hashes.
+- With `--signing-key <pem>`, it writes optional `attestation.json` that signs
+  the final `manifest.json` bytes with ECDSA P-256 SHA-256 and embeds the public
+  key needed for verification.
 - The desktop/web import path writes `provenance.json` for manifest hash,
   producer fields, required artifact presence, schema-kind consistency, and
-  signature/attestation presence. Missing signatures remain a warning, not a
-  trusted-origin claim.
+  optional signature/attestation verification. Missing signatures remain a
+  warning. Valid signatures remain untrusted until a trusted-key registry or
+  producer policy exists.
 - It spawns argv directly with shell expansion disabled.
 - It does not sandbox the child process.
 - It does not identify every destructive command.
 - It does not mediate environment variables, filesystem access, network access,
   or credentials inherited from the invoking shell.
+- It does not protect the signing key or prove the private-key holder is a
+  trusted Wutai producer.
 - It does not replace the future desktop permission broker.
 
 Any product surface that exposes command execution to non-developer users must
