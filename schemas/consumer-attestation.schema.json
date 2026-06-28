@@ -41,7 +41,84 @@
       "additionalProperties": true
     },
     "decision": {
-      "enum": ["ratified", "rejected", "needs_changes"]
+      "enum": ["ratified", "refused", "rejected", "needs_changes", "no_action"]
+    },
+    "declaredScope": {
+      "type": "string",
+      "description": "Reviewer-written boundary for what is ratified. Required by policy for a ratified decision to count as scoped ratification."
+    },
+    "excludedScope": {
+      "type": "string",
+      "description": "Reviewer-written boundary for what is not ratified. Required by policy for a ratified decision to count as scoped ratification."
+    },
+    "scopeReasons": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "intent_drift",
+          "empty_seat",
+          "unevidenced_claims",
+          "scope_boundary",
+          "trace_incomplete",
+          "other"
+        ]
+      }
+    },
+    "refusalReasons": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "intent_drift",
+          "empty_seat",
+          "unevidenced_claims",
+          "scope_boundary",
+          "trace_incomplete",
+          "other"
+        ]
+      }
+    },
+    "wedgeSignals": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "intent_drift",
+          "empty_seat",
+          "unevidenced_claims",
+          "none"
+        ]
+      }
+    },
+    "wedge": {
+      "type": "object",
+      "properties": {
+        "changedReviewBehavior": { "type": "boolean" },
+        "signals": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "intent_drift",
+              "empty_seat",
+              "unevidenced_claims",
+              "none"
+            ]
+          }
+        },
+        "statement": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "experiment": {
+      "type": "object",
+      "properties": {
+        "arm": {
+          "enum": ["diff_only", "packet", "negative_control", "sham_control"]
+        },
+        "wizardOfOz": { "type": "boolean" },
+        "baselineSignatureDisposition": { "type": "string" },
+        "baselineRiskRestatement": { "type": "string" },
+        "shamFieldAttributed": { "type": "boolean" }
+      },
+      "additionalProperties": true
     },
     "reviewedAt": { "type": "string", "format": "date-time" },
     "statement": { "type": "string", "minLength": 1 }

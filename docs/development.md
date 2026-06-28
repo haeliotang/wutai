@@ -4,9 +4,9 @@
 
 ## 1. 当前定位
 
-Wutai 是个人电脑上的 agentic work 本地信任与证据层。它不试图成为替用户完成所有任务的 agent 应用，而是监督 agent 在本机上下文中做了什么、被允许访问什么、产生了什么成果物，以及哪些结论需要证据复核或人工背书。
+Wutai 是 agentic work 跨越信任边界时的本地信任与证据层。它不试图成为替用户完成所有任务的 agent 应用，而是记录 agent 在本机上下文中声明做了什么、被允许访问什么、产生了什么成果物，以及哪些结论需要证据复核或人工限定范围签收。
 
-当前仓库实现一个受监督的研究任务链路、一个 local-script trace-import 楔子、一个开发期 CLI wrapper、External Agent Integration Contract、Agent Packet Inbox，以及 v0.6 consumer attestation gate，用它们证明以下本地信任层闭环：
+当前仓库实现一个受监督的研究任务链路、一个 local-script trace-import 楔子、一个开发期 CLI wrapper、External Agent Integration Contract、Agent Packet Inbox，以及 v0.7 scoped ratification experiment harness，用它们证明以下本地信任层闭环：
 
 ```text
 自然语言任务
@@ -18,16 +18,16 @@ Wutai 是个人电脑上的 agentic work 本地信任与证据层。它不试图
   -> 本地任务历史
 ```
 
-当前未实现任意外部 agent 的运行期强制监督、shell command 沙箱或完整 permission broker、MCP proxy、浏览器控制、Codex/Claude Code live 适配、完整 computer-use、跨 agent credential broker、移动端确认器、consumer reviewer 的密码学身份认证、自动 GitHub PR reviewer 提取、真实非作者采用证明和生产打包。
+当前未实现任意外部 agent 的运行期强制监督、shell command 沙箱或完整 permission broker、MCP proxy、浏览器控制、Codex/Claude Code live 适配、完整 computer-use、跨 agent credential broker、移动端确认器、consumer reviewer 的密码学身份认证、自动 GitHub PR reviewer 提取、路径级见证、trace 完整性证明、真实非作者采用证明和生产打包。
 
 ## 2. 开发原则
 
 - **不重造 agent runtime**：Wutai 包装 GPT Researcher、browser-use、Codex、Claude Code、MCP server 等外部能力，而不是重新实现它们。
-- **默认本地可审计**：任务、事件、权限、成果物和证据结果应优先落入本地 ledger。
+- **默认本地可审计**：任务、事件、权限、成果物、证据结果和限定范围签收结果应优先落入本地 ledger。
 - **权限先于能力**：任何读取文件、使用凭证、写入成果物、执行命令、操作浏览器或调用外部服务的能力，都必须先有 scope 和审计记录。
 - **Evidence Gate 不是 oracle**：证据闸只能说明被抽取的 claims 是否满足当前规则，不能保证整篇报告全部真实。
 - **日志不是默认 UX**：普通用户看到 plain-language timeline；runtime logs 只进入 expert view 或 audit artifact。
-- **人类背书不可自动化**：agent 可以准备 review surface，但不能替用户做最终 alignment / accountability 判断。
+- **人类背书不可自动化**：agent 可以准备 review surface，但不能替用户做最终 alignment / accountability 判断；无 `declaredScope` / `excludedScope` 的签收是 theater anti-signal。
 - **先证明 work packet，再扩展控制面**：下一阶段应先稳定跨任务 work-packet schema，再做更强的 MCP/browser/computer-use 权限边界。
 
 ## 3. 仓库结构
@@ -66,7 +66,7 @@ src-tauri/
 scripts/
   wutai_run.mjs                   开发期 CLI wrapper，执行命令并生成 work packet
   wutai_verify_packet.mjs         packet verifier 和 trust verdict CLI
-  wutai_attestation_gate.mjs      consumer attestation gate，复核 packet 后要求非 self ratification
+  wutai_attestation_gate.mjs      scoped ratification harness，复核 packet 后拆分 wedge/moat outcome
   gpt_researcher_adapter.py       Python GPT Researcher sidecar
   evidence_gate.py                claim ledger 和 deterministic evidence rules
 
@@ -74,7 +74,7 @@ examples/
   external-agent-wrapper.mjs      v0.4 external adapter example
   adapter-proof-runner.mjs        v0.5 registered adapter proof harness
   consumer-attestation.example.json
-                                  v0.6 consumer attestation example
+                                  v0.7 scoped ratification example
 
 config/
   wutai-adapter-registry.json     adapter registry and proof boundaries
@@ -87,12 +87,13 @@ tests/
   node/wutai_adapter_proof.test.mjs
                                   v0.5 adapter proof runner 回归
   node/wutai_consumer_attestation_gate.test.mjs
-                                  v0.6 consumer attestation gate 回归
+                                  v0.7 scoped ratification gate 回归
   python/test_evidence_gate.py    Evidence Gate 离线回归
 
 docs/
   architecture.md                 架构分层
-  consumer-attestation-gate.md    v0.6 consumer attestation gate
+  consumer-attestation-gate.md    v0.7 scoped ratification gate
+  ratification-prereg.md          v0.7 scoped ratification prereg
   agent-packet-inbox.md           v0.5 Agent Packet Inbox
   packet-contract.md              v0.4 External Agent Integration Contract
   security-model.md               权限和安全模型
@@ -343,7 +344,7 @@ CLI wrapper 回归：
 npm run test:wutai-run
 ```
 
-Consumer attestation gate CLI smoke：
+Scoped ratification gate CLI smoke：
 
 ```bash
 npm run wutai:attest -- --help
@@ -458,9 +459,9 @@ Wutai 默认不应把权限永久化。权限应按 task/session scope 记录，
 - Agent Packet Inbox 从 task history 派生 packet index，读取 `manifest.json`、`trust-verdict.json`、`provenance.json`、`policy.json` 和可选 `retention.json`，支持按 search、producer、verdict、retention 过滤，并能导出当前 inbox summary。
 - Adapter registry 定义 native/proof-harness/external-contract/planned adapter 边界；v0.5 proof harness 覆盖 `codexCli`、`claudeCode`、`githubActions` producer id，但不声称官方 live 集成或运行时监督。
 - Packet retention review 会写入 `retention.json`，记录 `retained` / `rejected` 本地决策；该决策不删除外部文件、不改变外部 runtime，也不证明 packet 安全。
-- Consumer Attestation Gate 会读取 `consumer-attestation.json`，重新运行 packet verifier，要求 `ratified` 决策、非 self reviewer、当前 `manifest.json` hash 绑定、packet identity 绑定，并可写入 `consumer-attestation-check.json`；该 gate 不证明 reviewer 的真实身份、不自动读取 GitHub PR review metadata、不证明已有非作者采用。
+- Scoped Ratification Gate 会读取 `consumer-attestation.json`，重新运行 packet verifier，要求非 self reviewer、当前 `manifest.json` hash 绑定、packet identity 绑定，并可写入 `consumer-attestation-check.json`；v0.7 会拆分 `wedgeOutcome` 和 `moatOutcome`，只有带 `declaredScope` / `excludedScope` 的 `scoped_ratified` 才是 acceptance pass，带 scope/evidence/empty-seat 理由的 refusal 是有效 MOAT 读数但不是 pass，无范围 ratification 是 theater anti-signal。该 gate 不证明 reviewer 的真实身份、不自动读取 GitHub PR review metadata、不证明 trace 完整性、不证明已有非作者采用。
 
-下一目标：优先用 v0.6 gate 做一次真实的非作者 packet ratification 流程；只有当这个消费回路成立，再继续推进 witnessed trace / MCP recorder 或 credential-broker boundary。
+下一目标：用 `docs/ratification-prereg.md` 约束一次真实的非作者 scoped-ratification session。代码层只能继续推进验证仪器：baseline/negative-control fixture、自动渲染最小字段、或标准 provenance 输出；不要把 v0.7 的 harness 叙述成已验证产品。
 
 验收标准：
 

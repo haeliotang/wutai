@@ -7,6 +7,21 @@ import { verifyPacketDirectory } from "./wutai_verify_packet.mjs";
 
 const CONSUMER_ATTESTATION_NAME = "consumer-attestation.json";
 const CONSUMER_ATTESTATION_CHECK_NAME = "consumer-attestation-check.json";
+const VALID_DECISIONS = new Set([
+  "ratified",
+  "refused",
+  "rejected",
+  "needs_changes",
+  "no_action",
+]);
+const SCOPE_REASON_SIGNALS = new Set([
+  "intent_drift",
+  "empty_seat",
+  "unevidenced_claims",
+  "scope_boundary",
+  "trace_incomplete",
+  "other",
+]);
 
 function usage() {
   return `Usage:
@@ -14,7 +29,7 @@ function usage() {
   npm run wutai:attest -- [options] <packet-dir>
 
 Options:
-  --attestation <path>         Consumer attestation JSON. Default: <packet-dir>/consumer-attestation.json.
+  --attestation <path>         Scoped ratification JSON. Default: <packet-dir>/consumer-attestation.json.
   --disallow-reviewer <id>     Reviewer id that cannot satisfy the gate. Repeatable.
   --trusted-producers <path>   Trusted producer policy JSON for packet verification.
   --trust-policy <path>        Trust verdict policy JSON for packet verification.
@@ -23,7 +38,7 @@ Options:
   --help                       Show this message.
 
 Exit codes:
-  0 passed, 20 failed, 2 usage or packet-read error.`;
+  0 accepted scoped ratification, 20 not accepted or invalid, 2 usage or packet-read error.`;
 }
 
 function parseArgs(argv) {
@@ -96,6 +111,94 @@ function normalizeReviewerId(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function hasText(value) {
+  return typeof value === "string" && Boolean(value.trim());
+}
+
+function stringList(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizedScopeReasons(attestation) {
+  return [
+    ...stringList(attestation.scopeReasons),
+    ...stringList(attestation.refusalReasons),
+  ].filter((reason, index, list) => list.indexOf(reason) === index);
+}
+
+function normalizedWedgeSignals(attestation) {
+  const wedge = isRecord(attestation.wedge) ? attestation.wedge : {};
+  return [...stringList(wedge.signals), ...stringList(attestation.wedgeSignals)]
+    .map((signal) => signal.toLowerCase())
+    .filter((signal) => signal && signal !== "none")
+    .filter((signal, index, list) => list.indexOf(signal) === index);
+}
+
+function wedgeOutcome(attestation) {
+  const wedge = isRecord(attestation.wedge) ? attestation.wedge : {};
+  const signals = normalizedWedgeSignals(attestation);
+  if (wedge.changedReviewBehavior === true || signals.length > 0) {
+    return "wedge_win";
+  }
+  if (
+    wedge.changedReviewBehavior === false ||
+    (Array.isArray(wedge.signals) && signals.length === 0) ||
+    (Array.isArray(attestation.wedgeSignals) && signals.length === 0)
+  ) {
+    return "wedge_null";
+  }
+  return "not_recorded";
+}
+
+function moatOutcome(attestation) {
+  const decision = typeof attestation.decision === "string" ? attestation.decision : "";
+  const scopeReasons = normalizedScopeReasons(attestation);
+  const hasScopedBoundary =
+    hasText(attestation.declaredScope) && hasText(attestation.excludedScope);
+  const hasScopeReason = scopeReasons.some((reason) => SCOPE_REASON_SIGNALS.has(reason));
+
+  if (decision === "ratified") {
+    return hasScopedBoundary ? "scoped_ratified" : "theater_signature";
+  }
+  if (["refused", "rejected", "needs_changes"].includes(decision)) {
+    return hasScopeReason && hasText(attestation.statement)
+      ? "refused_with_scope_reason"
+      : "no_action";
+  }
+  return "no_action";
+}
+
+function moatSignal(outcome) {
+  if (outcome === "scoped_ratified" || outcome === "refused_with_scope_reason") {
+    return "moat_win";
+  }
+  if (outcome === "theater_signature") return "anti_signal";
+  return "moat_null";
+}
+
+function experimentCell(wedge, moat) {
+  const signal = moatSignal(moat);
+  if (wedge === "not_recorded") {
+    if (signal === "anti_signal") return "unclassified_theater";
+    return "unclassified";
+  }
+  const wedgeCell = wedge === "wedge_win" ? "wedge_win" : "wedge_null";
+  if (signal === "anti_signal") return `${wedgeCell}_theater`;
+  if (signal === "moat_win") return `${wedgeCell}_moat_win`;
+  return `${wedgeCell}_moat_null`;
+}
+
+function gateDecision(structuralPassed, moat) {
+  if (!structuralPassed) return "invalid";
+  if (moat === "scoped_ratified") return "accepted";
+  if (moat === "refused_with_scope_reason") return "not_accepted";
+  return "invalid";
+}
+
 function addCheck(checks, status, name, message, evidence = undefined) {
   checks.push({
     name,
@@ -107,6 +210,21 @@ function addCheck(checks, status, name, message, evidence = undefined) {
 
 function decisionStatus(checks) {
   return checks.some((check) => check.status === "failed") ? "failed" : "passed";
+}
+
+function summaryFor({ status, gate, wedge, moat }) {
+  if (gate === "accepted") {
+    return `Scoped ratification gate passed: ${moat} with ${wedge}.`;
+  }
+  if (moat === "refused_with_scope_reason") {
+    return `Reviewer refused scoped ratification with a scope/evidence/empty-seat reason. This is a valid MOAT readout, but it is not an acceptance pass.`;
+  }
+  if (moat === "theater_signature") {
+    return "Reviewer ratified without a declared scope and excluded scope. This is a THEATER anti-signal, not a pass.";
+  }
+  return status === "failed"
+    ? `Scoped ratification gate failed before a valid moat readout: ${moat}.`
+    : `Scoped ratification gate produced ${moat} with ${wedge}.`;
 }
 
 export async function runConsumerAttestationGate(packetDir, options = {}) {
@@ -132,6 +250,9 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
   const subject = isRecord(attestation.subject) ? attestation.subject : {};
   const reviewer = isRecord(attestation.reviewer) ? attestation.reviewer : {};
   const reviewerId = normalizeReviewerId(reviewer.id);
+  const scopeReasons = normalizedScopeReasons(attestation);
+  const wedge = wedgeOutcome(attestation);
+  const moat = moatOutcome(attestation);
   const disallowedReviewers = (options.disallowedReviewers ?? [])
     .flatMap((item) => String(item).split(","))
     .map(normalizeReviewerId)
@@ -152,16 +273,16 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
     attestation.kind === "wutai.consumer_attestation" ? "passed" : "failed",
     "attestation_kind",
     attestation.kind === "wutai.consumer_attestation"
-      ? "Consumer attestation kind matches the v0.6 contract."
+      ? "Consumer attestation kind matches the v0.7 contract."
       : `Consumer attestation kind mismatch: ${String(attestation.kind ?? "missing")}.`,
   );
   addCheck(
     checks,
-    attestation.decision === "ratified" ? "passed" : "failed",
-    "consumer_decision",
-    attestation.decision === "ratified"
-      ? "Consumer reviewer ratified the packet."
-      : `Consumer reviewer decision is not ratified: ${String(attestation.decision ?? "missing")}.`,
+    VALID_DECISIONS.has(attestation.decision) ? "passed" : "failed",
+    "consumer_decision_recorded",
+    VALID_DECISIONS.has(attestation.decision)
+      ? `Consumer reviewer recorded decision: ${attestation.decision}.`
+      : `Consumer reviewer decision is missing or unsupported: ${String(attestation.decision ?? "missing")}.`,
   );
   addCheck(
     checks,
@@ -205,32 +326,51 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
   );
   addCheck(
     checks,
-    typeof attestation.statement === "string" && attestation.statement.trim()
-      ? "passed"
-      : "failed",
+    hasText(attestation.statement) ? "passed" : "failed",
     "review_statement",
     "Consumer attestation must include a non-empty human review statement.",
   );
   addCheck(
     checks,
-    typeof attestation.reviewedAt === "string" && attestation.reviewedAt.trim()
-      ? "passed"
-      : "failed",
+    hasText(attestation.reviewedAt) ? "passed" : "failed",
     "review_timestamp",
     "Consumer attestation must record reviewedAt.",
   );
+  addCheck(
+    checks,
+    moat === "theater_signature" ? "failed" : "passed",
+    "declared_scope",
+    moat === "theater_signature"
+      ? "A ratified decision without declaredScope and excludedScope is a theater signature."
+      : "Ratification outcome is not an unscoped theater signature.",
+    `declaredScope=${hasText(attestation.declaredScope) ? "present" : "missing"} excludedScope=${hasText(attestation.excludedScope) ? "present" : "missing"}`,
+  );
+  addCheck(
+    checks,
+    moat === "no_action" ? "failed" : "passed",
+    "moat_outcome",
+    moat === "no_action"
+      ? "No scoped ratification or scoped refusal was observed."
+      : `Moat outcome recorded: ${moat}.`,
+    `scopeReasons=${scopeReasons.length ? scopeReasons.join(",") : "none"}`,
+  );
 
-  const status = decisionStatus(checks);
+  const structuralStatus = decisionStatus(checks);
+  const decision = gateDecision(structuralStatus === "passed", moat);
+  const status = decision === "accepted" ? "passed" : "failed";
+  const cell = experimentCell(wedge, moat);
   const artifact = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: "wutai.consumer_attestation_check",
     taskId: manifest.taskId,
     generatedAt,
     status,
-    summary:
-      status === "passed"
-        ? "Consumer attestation gate passed with a non-self ratification over this packet."
-        : `Consumer attestation gate failed ${checks.filter((check) => check.status === "failed").length} check${checks.filter((check) => check.status === "failed").length === 1 ? "" : "s"}.`,
+    gateDecision: decision,
+    wedgeOutcome: wedge,
+    moatOutcome: moat,
+    moatSignal: moatSignal(moat),
+    experimentCell: cell,
+    summary: summaryFor({ status, gate: decision, wedge, moat }),
     packet: {
       packetId: manifest.packetId,
       packetType: manifest.packetType,
@@ -244,14 +384,30 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
       role: reviewer.role,
       source: reviewer.source,
     },
+    ratification: {
+      decision: attestation.decision,
+      declaredScope: attestation.declaredScope ?? null,
+      excludedScope: attestation.excludedScope ?? null,
+      scopeReasons,
+      wedgeSignals: normalizedWedgeSignals(attestation),
+    },
     policy: {
-      requiredDecision: "ratified",
+      requiredDecision: "scoped_ratified",
       disallowedReviewers,
       blockedPacketAction: "fail",
+      refusalAction: "fail_acceptance_but_record_moat_win",
+      theaterAction: "fail",
     },
+    antiSignals:
+      moat === "theater_signature"
+        ? [
+            "ratified_without_declared_scope",
+            "ratified_without_excluded_scope",
+          ]
+        : [],
     checks,
     limitation:
-      "This gate records a consumer ratification over packet artifacts. It does not prove reviewer identity, provide sandbox execution, or make the packet safe.",
+      "This harness records scoped ratification over a declared packet trace. It does not prove reviewer identity, trace completeness, sandbox execution, or make the packet safe.",
   };
 
   if (options.writeArtifacts) {

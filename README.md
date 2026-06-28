@@ -3,15 +3,15 @@
 <!-- StillMirror maintainer-review badge — advancing-the-core vs upkeep, refreshed weekly in CI; evidence, not a verdict -->
 ![StillMirror](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/haeliotang/wutai/stillmirror-badges/maintainer-badge.json)
 
-Wutai is a local trust and evidence layer for agentic work on personal
-computers.
+Wutai is a local trust and evidence layer for agentic work crossing a trust
+boundary.
 
 It is designed for the point where an agent stops being a chat answer and starts
 touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.6 consumer attestation gate. The current code
+> Repository status: v0.7 scoped ratification experiment harness. The current code
 > implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
@@ -20,10 +20,11 @@ auditable, stoppable, and reviewable.
 > coding agents, or full computer-use sessions. v0.5 adds a local Agent Packet
 > Inbox over the packet contract, so external-agent work can be collected,
 > filtered, explained, retained, or rejected without implying Wutai controlled
-> the original runtime. v0.6 adds a CLI/CI consumer attestation gate that
-> re-verifies a packet and requires a non-self `ratified` review bound to the
-> packet manifest hash. It does not prove reviewer identity or external demand
-> by itself.
+> the original runtime. v0.7 adds a CLI/CI scoped ratification harness that
+> re-verifies a packet, separates review-compression (`wedgeOutcome`) from
+> ratification (`moatOutcome`), requires `declaredScope` and `excludedScope`
+> for acceptance, and marks unscoped ratification as a theater anti-signal. It
+> does not prove reviewer identity, trace completeness, or external demand.
 
 ## Why This Exists
 
@@ -31,8 +32,8 @@ Agentic work is becoming fragmented across model providers, coding tools,
 browser agents, local scripts, MCP servers, and OS-level assistants. Each
 runtime can have its own logs, permissions, credentials, and artifacts.
 
-Wutai's product thesis is that users still need a local trust boundary they
-control:
+Wutai's product thesis is that agent work needs a local record before it crosses
+a trust boundary:
 
 - What did the agent ask to access?
 - What did the user approve or deny?
@@ -40,8 +41,9 @@ control:
 - Which sources, claims, logs, and artifacts were produced?
 - Which parts are verified, weakly supported, or still require human review?
 
-Wutai is not trying to be the agent that does every task. It is the local layer
-that records, scopes, and verifies agentic work.
+Wutai is not trying to be the agent that does every task. It is the layer that
+records declared traces, scopes claims and intent, and tests whether a named
+reviewer will ratify or refuse the work within an explicit boundary.
 
 ## Current Implementation
 
@@ -51,9 +53,10 @@ coding-agent trace import, MCP tool-call trace import, local file ingestion,
 and a developer CLI wrapper. v0.4 adds an External Agent Integration Contract:
 third-party agents and wrappers can write Wutai-compatible local-script packets,
 then call the same local verifier and trust policy gate that Wutai uses. v0.5
-turns those packets into a local inbox for review and retention. v0.6 adds a
-consumer attestation gate for requiring a second, non-self ratification over a
-packet before it passes CI or another local acceptance gate.
+turns those packets into a local inbox for review and retention. v0.7 adds a
+scoped ratification harness for testing whether a second, non-self reviewer
+will sign a declared boundary or refuse because of intent drift, an empty
+accountability seat, or unevidenced claims.
 
 ```text
 natural-language task
@@ -132,11 +135,14 @@ Implemented:
   `strict-local`, and `ci-review`.
 - Example GitHub Actions packet-verification gate in
   `.github/workflows/wutai-verify-packet.example.yml`.
-- Consumer Attestation Gate v0.6. `wutai attest-packet` /
+- Scoped Ratification Gate v0.7. `wutai attest-packet` /
   `npm run wutai:attest -- <packet-dir>` re-runs packet verification, reads a
-  `consumer-attestation.json`, requires `decision: "ratified"`, rejects
-  caller-disallowed reviewer ids, binds the review to the current
-  `manifest.json` SHA-256, and can write `consumer-attestation-check.json`.
+  `consumer-attestation.json`, rejects caller-disallowed reviewer ids, binds
+  the review to the current `manifest.json` SHA-256, separates
+  `wedgeOutcome` from `moatOutcome`, requires `declaredScope` and
+  `excludedScope` for acceptance, records scoped refusal as a valid moat
+  readout but not an acceptance pass, and marks unscoped ratification as a
+  theater anti-signal.
 - Example GitHub Actions consumer-attestation gate in
   `.github/workflows/wutai-consumer-attestation.example.yml`.
 - Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
@@ -241,7 +247,7 @@ Wutai also writes a local review artifact:
 review.json
 ```
 
-If a packet is ratified by a consumer attestation gate, Wutai may also write:
+If a packet is processed by the scoped ratification gate, Wutai may also write:
 
 ```text
 consumer-attestation.json
@@ -258,8 +264,10 @@ Not implemented:
   the v0.5 packet proof harness.
 - Cryptographic consumer-reviewer identity proof or automatic GitHub PR
   reviewer extraction.
-- Proof that non-author users already want to perform this attestation; v0.6
-  only provides the gate needed to test that behavior.
+- Path-level witnessing of external runtimes; current external packet paths
+  record declared traces supplied by producers.
+- Proof that non-author users already want to perform scoped ratification; v0.7
+  only provides the harness needed to test that behavior.
 - Cross-agent credential broker.
 - Mobile approval companion.
 - Production packaging.
@@ -284,7 +292,8 @@ behavior.
 Key design documents:
 
 - [Development Guide](docs/development.md)
-- [Consumer Attestation Gate](docs/consumer-attestation-gate.md)
+- [Scoped Ratification Gate](docs/consumer-attestation-gate.md)
+- [Scoped Ratification Prereg](docs/ratification-prereg.md)
 - [Agent Packet Inbox](docs/agent-packet-inbox.md)
 - [v0.4 Packet Contract](docs/packet-contract.md)
 - [Product Brief](docs/product-brief.md)
@@ -511,13 +520,16 @@ To persist the verifier's derived artifacts beside the packet:
 npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
 ```
 
-## Consumer Attestation Gate
+## Scoped Ratification Gate
 
-v0.6 adds a post-hoc gate for the question Wutai most needs to test: did a
-non-author reviewer actually consume and ratify this packet?
+v0.7 adds a post-hoc harness for the question Wutai most needs to test: did a
+non-author reviewer perform scoped ratification, refuse for a real
+scope/evidence/accountability reason, or merely rubber-stamp the packet?
 
 Create or supply a `consumer-attestation.json` that binds to the current
-`manifest.json` SHA-256, packet id, task id, and producer adapter. Then run:
+`manifest.json` SHA-256, packet id, task id, and producer adapter. A ratified
+decision must include reviewer-written `declaredScope` and `excludedScope`.
+Then run:
 
 ```bash
 npm run wutai:attest -- \
@@ -543,10 +555,14 @@ npm run wutai:attest -- \
 ```
 
 The gate re-runs packet verification first. It fails if the packet is blocked,
-if the reviewer is missing or self-disallowed, if the decision is not
-`ratified`, or if the attestation points at a stale manifest hash. This is a
-review accountability gate, not reviewer identity proof, runtime supervision,
-or evidence that outside users already want to do the review.
+if the reviewer is missing or self-disallowed, if the attestation points at a
+stale manifest hash, or if a ratified decision lacks scope boundaries. It
+outputs `wedgeOutcome`, `moatOutcome`, and `experimentCell` so a
+review-compression win cannot be counted as a ratification win. A scoped
+refusal is a valid moat readout but exits non-zero because the work was not
+accepted. This is a ratification experiment harness, not reviewer identity
+proof, runtime supervision, path-level witnessing, or evidence that outside
+users already want to do the review.
 
 ## External Agent Integration Contract
 

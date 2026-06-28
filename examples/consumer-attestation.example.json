@@ -14,6 +14,21 @@
     "source": "github_review"
   },
   "decision": "ratified",
+  "declaredScope": "I ratify only the packet artifacts and declared local-script outcome for this task.",
+  "excludedScope": "I do not ratify trace completeness, runtime sandboxing, external side effects, or behavior outside the manifest.",
+  "scopeReasons": [],
+  "wedge": {
+    "changedReviewBehavior": false,
+    "signals": ["none"],
+    "statement": "This example does not claim the packet changed review behavior."
+  },
+  "experiment": {
+    "arm": "packet",
+    "wizardOfOz": true,
+    "baselineSignatureDisposition": "not recorded in this example",
+    "baselineRiskRestatement": "not recorded in this example",
+    "shamFieldAttributed": false
+  },
   "reviewedAt": "2026-06-28T00:00:00.000Z",
   "statement": "I reviewed the packet artifacts and ratify this result for the stated task."
 }

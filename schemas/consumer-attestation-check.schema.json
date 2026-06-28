@@ -9,8 +9,14 @@
     "taskId",
     "generatedAt",
     "status",
+    "gateDecision",
+    "wedgeOutcome",
+    "moatOutcome",
+    "moatSignal",
+    "experimentCell",
     "packet",
     "reviewer",
+    "ratification",
     "policy",
     "checks",
     "limitation"
@@ -21,6 +27,29 @@
     "taskId": { "type": "string", "minLength": 1 },
     "generatedAt": { "type": "string", "format": "date-time" },
     "status": { "enum": ["passed", "failed"] },
+    "gateDecision": { "enum": ["accepted", "not_accepted", "invalid"] },
+    "wedgeOutcome": { "enum": ["wedge_win", "wedge_null", "not_recorded"] },
+    "moatOutcome": {
+      "enum": [
+        "refused_with_scope_reason",
+        "scoped_ratified",
+        "theater_signature",
+        "no_action"
+      ]
+    },
+    "moatSignal": { "enum": ["moat_win", "anti_signal", "moat_null"] },
+    "experimentCell": {
+      "enum": [
+        "wedge_win_moat_win",
+        "wedge_win_moat_null",
+        "wedge_null_moat_win",
+        "wedge_null_moat_null",
+        "wedge_win_theater",
+        "wedge_null_theater",
+        "unclassified_theater",
+        "unclassified"
+      ]
+    },
     "summary": { "type": "string" },
     "packet": {
       "type": "object",
@@ -47,18 +76,50 @@
       },
       "additionalProperties": true
     },
+    "ratification": {
+      "type": "object",
+      "required": [
+        "decision",
+        "declaredScope",
+        "excludedScope",
+        "scopeReasons",
+        "wedgeSignals"
+      ],
+      "properties": {
+        "decision": {
+          "enum": ["ratified", "refused", "rejected", "needs_changes", "no_action"]
+        },
+        "declaredScope": { "type": ["string", "null"] },
+        "excludedScope": { "type": ["string", "null"] },
+        "scopeReasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "wedgeSignals": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
     "policy": {
       "type": "object",
       "required": ["requiredDecision", "disallowedReviewers", "blockedPacketAction"],
       "properties": {
-        "requiredDecision": { "const": "ratified" },
+        "requiredDecision": { "const": "scoped_ratified" },
         "disallowedReviewers": {
           "type": "array",
           "items": { "type": "string" }
         },
-        "blockedPacketAction": { "const": "fail" }
+        "blockedPacketAction": { "const": "fail" },
+        "refusalAction": { "const": "fail_acceptance_but_record_moat_win" },
+        "theaterAction": { "const": "fail" }
       },
       "additionalProperties": true
+    },
+    "antiSignals": {
+      "type": "array",
+      "items": { "type": "string" }
     },
     "checks": {
       "type": "array",
