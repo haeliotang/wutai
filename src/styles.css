@@ -317,6 +317,192 @@ select:focus {
   color: #ffb085;
 }
 
+.agent-inbox {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  border-color: #34454d;
+}
+
+.agent-inbox .panel-header > div {
+  display: grid;
+  gap: 5px;
+}
+
+.agent-inbox .panel-header p {
+  color: #9fa497;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.agent-inbox-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-inbox-metrics span {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #2b2f29;
+  border-radius: 6px;
+  padding: 10px;
+  color: #9fa497;
+  font-size: 12px;
+}
+
+.agent-inbox-metrics strong {
+  color: #f4f1e8;
+  font-size: 17px;
+}
+
+.agent-inbox-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.agent-inbox-filters label {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-inbox-filters span {
+  color: #d6e8c6;
+  font-size: 12px;
+}
+
+.agent-inbox-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-inbox-row {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 112px 116px;
+  gap: 12px;
+  align-items: center;
+  min-height: 68px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.agent-inbox-row strong {
+  display: block;
+  overflow: hidden;
+  color: #f4f1e8;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-inbox-row p {
+  margin-top: 4px;
+  overflow: hidden;
+  color: #b8b6aa;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-inbox-row-active {
+  border-color: #91c789;
+  background: #11180f;
+}
+
+.agent-inbox-verdict,
+.agent-inbox-secondary {
+  align-self: center;
+  border: 1px solid #3f463d;
+  border-radius: 999px;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.agent-inbox-verdict-trusted {
+  border-color: #95e884;
+  color: #95e884;
+}
+
+.agent-inbox-verdict-review_required,
+.agent-inbox-verdict-no_verdict {
+  border-color: #e7d37a;
+  color: #e7d37a;
+}
+
+.agent-inbox-verdict-blocked {
+  border-color: #ffb085;
+  color: #ffb085;
+}
+
+.agent-inbox-secondary {
+  color: #d4d1c5;
+}
+
+.adapter-registry {
+  border: 1px solid #242820;
+  border-radius: 8px;
+  background: #050605;
+}
+
+.adapter-registry summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 11px 12px;
+  color: #d6e8c6;
+  cursor: pointer;
+}
+
+.adapter-registry summary strong {
+  color: #95e884;
+}
+
+.adapter-registry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  border-top: 1px solid #20241e;
+  padding: 12px;
+}
+
+.adapter-registry-grid > div {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #242820;
+  border-radius: 6px;
+  padding: 10px;
+  background: #070807;
+}
+
+.adapter-registry-grid span {
+  color: #95e884;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.adapter-registry-grid strong {
+  color: #f4f1e8;
+  font-size: 13px;
+}
+
+.adapter-registry-grid code {
+  color: #e7d37a;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.adapter-registry-grid p,
+.adapter-registry-grid small {
+  color: #b8b6aa;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .primary-action {
   border-color: #95e884;
   color: #061005;
@@ -380,6 +566,7 @@ select:focus {
 .permission-box,
 .research-setup,
 .evidence-section,
+.agent-inbox,
 .cli-review-section,
 .artifact-section {
   border: 1px solid #2f332c;
@@ -630,6 +817,7 @@ select:focus {
 }
 
 .dry-run-review-panel,
+.retention-panel,
 .trust-verdict-panel,
 .policy-review-panel,
 .integrity-panel,
@@ -644,6 +832,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header h3,
+.retention-panel .panel-header h3,
 .trust-verdict-panel .panel-header h3,
 .policy-review-panel .panel-header h3,
 .integrity-panel .panel-header h3,
@@ -655,6 +844,7 @@ select:focus {
 }
 
 .dry-run-review-panel .panel-header > strong,
+.retention-panel .panel-header > strong,
 .trust-verdict-panel .panel-header > strong,
 .policy-review-panel .panel-header > strong,
 .integrity-panel .panel-header > strong,
@@ -668,6 +858,7 @@ select:focus {
 }
 
 .dry-run-review-panel > p,
+.retention-panel > p,
 .trust-verdict-panel > p,
 .policy-review-panel > p,
 .integrity-panel > p,
@@ -679,6 +870,10 @@ select:focus {
 .dry-run-review-panel {
   border-color: #6f5b22;
   background: #120f07;
+}
+
+.retention-panel {
+  border-color: #34454d;
 }
 
 .trust-verdict-trusted {
@@ -1311,6 +1506,8 @@ select:focus {
   .permission-box,
   .provider-setup-form,
   .provider-advanced-grid,
+  .agent-inbox-metrics,
+  .agent-inbox-filters,
   .evidence-metrics,
   .cli-review-grid,
   .dry-run-review-grid,
@@ -1322,6 +1519,7 @@ select:focus {
   }
 
   .cli-rule-list > div,
+  .agent-inbox-row,
   .trust-key-row,
   .trust-check-list > div,
   .policy-override-list > div,

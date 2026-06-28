@@ -730,6 +730,19 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     },
   ]);
 
+  const packetInbox = page.getByRole("region", { name: "Agent Packet Inbox" });
+  const packetInboxRow = packetInbox.locator(".agent-inbox-row").filter({
+    hasText: "CLI run: sh -c",
+  });
+  await expect(packetInbox).toBeVisible();
+  await expect(packetInboxRow).toBeVisible();
+  await expect(packetInboxRow.getByText("Wutai CLI Wrapper")).toBeVisible();
+  await expect(packetInboxRow.getByText("blocked")).toBeVisible();
+  await packetInbox.getByLabel("Verdict").selectOption("blocked");
+  await expect(packetInboxRow).toBeVisible();
+  await packetInbox.getByLabel("Search").fill("wutaiRunCli");
+  await expect(packetInboxRow).toBeVisible();
+
   const cliReview = page.getByLabel("CLI Packet Review");
   await expect(cliReview).toBeVisible();
   await expect(
@@ -818,6 +831,23 @@ test("imports a CLI wrapper packet for desktop review", async ({ page }) => {
     provenance.checks.find((check: { name: string }) => check.name === "trusted_signature")
       .status,
   ).toBe("warning");
+
+  await cliReview.getByRole("button", { name: "Retain packet" }).click();
+  await expect(
+    cliReview.locator(".retention-panel .panel-header > strong"),
+  ).toHaveText("retained");
+  await expect(packetInboxRow.getByText("retained")).toBeVisible();
+  const retainedTask = await page.evaluate(() => {
+    const tasks = JSON.parse(window.localStorage.getItem("wutai.v0.tasks") ?? "[]");
+    return tasks[0];
+  });
+  const retentionArtifact = retainedTask.artifacts.find(
+    (item: { name: string }) => item.name === "retention.json",
+  );
+  expect(retentionArtifact).toBeTruthy();
+  const retention = JSON.parse(retentionArtifact.content);
+  expect(retention.kind).toBe("wutai.packet_retention_decision");
+  expect(retention.decision).toBe("retained");
 });
 
 test("imports a signed CLI wrapper packet and evaluates trust policy states", async ({

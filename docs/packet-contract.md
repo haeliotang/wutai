@@ -4,6 +4,10 @@ Wutai v0.4 defines an External Agent Integration Contract: an external agent,
 coding tool, script runner, or wrapper can produce a local work packet that
 Wutai can verify without owning the runtime that created it.
 
+Wutai v0.5 consumes the same packet contract through Agent Packet Inbox. The
+inbox indexes packet producer, trust verdict, provenance, policy, and local
+retention state; it does not change the runtime boundary described here.
+
 This is a packet contract, not a sandbox contract. Wutai verifies artifact
 integrity, packet provenance, optional manifest attestation, local
 trusted-producer policy, policy-review signals, and the final trust verdict. It

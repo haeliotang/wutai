@@ -158,8 +158,10 @@ test("v0.4 contract schemas and trust-policy profiles are valid JSON", async () 
     name.endsWith(".schema.json"),
   );
   assert.deepEqual(schemaFiles.sort(), [
+    "adapter-registry.schema.json",
     "cli-policy-preflight.schema.json",
     "local-script-trace.schema.json",
+    "packet-retention-decision.schema.json",
     "session-audit.schema.json",
     "session-ledger.schema.json",
     "trust-policy.schema.json",

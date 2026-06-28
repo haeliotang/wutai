@@ -11,15 +11,16 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.4 external integration contract. The current code
+> Repository status: v0.5 agent packet inbox. The current code
 > implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
 > not yet sandbox commands, enforce a general permission broker, or supervise
 > arbitrary external agents, browser-control runtimes, live MCP sessions, live
-> coding agents, or full computer-use sessions. v0.4 adds a packet-level
-> contract so external agents can hand work to Wutai for local verification
-> without implying Wutai controlled their runtime.
+> coding agents, or full computer-use sessions. v0.5 adds a local Agent Packet
+> Inbox over the packet contract, so external-agent work can be collected,
+> filtered, explained, retained, or rejected without implying Wutai controlled
+> the original runtime.
 
 ## Why This Exists
 
@@ -46,7 +47,8 @@ foundation extends the work-packet model with local-script trace import,
 coding-agent trace import, MCP tool-call trace import, local file ingestion,
 and a developer CLI wrapper. v0.4 adds an External Agent Integration Contract:
 third-party agents and wrappers can write Wutai-compatible local-script packets,
-then call the same local verifier and trust policy gate that Wutai uses.
+then call the same local verifier and trust policy gate that Wutai uses. v0.5
+turns those packets into a local inbox for review and retention.
 
 ```text
 natural-language task
@@ -125,6 +127,19 @@ Implemented:
   `strict-local`, and `ci-review`.
 - Example GitHub Actions packet-verification gate in
   `.github/workflows/wutai-verify-packet.example.yml`.
+- Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
+  history, indexes packet producer, packet type, trust verdict, provenance,
+  policy decision, attestation state, and retention state, and supports search,
+  producer, verdict, and retention filters.
+- Adapter registry in `config/wutai-adapter-registry.json`, mirrored in the UI,
+  with native adapters and proof-harness entries for `codexCli`, `claudeCode`,
+  and `githubActions`.
+- Adapter proof runner, `npm run example:adapter-proof -- --adapter <id> -- <command>`,
+  that wraps an explicit external command, writes a Wutai SDK packet, verifies
+  it, and optionally writes derived review artifacts.
+- Packet retention decisions. The review UI can record `retained` or
+  `rejected` into `retention.json` and export the current inbox or packet
+  summary.
 
 Each completed research task writes a local work packet:
 
@@ -220,6 +235,8 @@ Not implemented:
 - Shell command execution under a full Wutai permission broker or sandbox.
 - Live MCP proxy or runtime MCP tool-call recorder.
 - Browser-use, Codex, Claude Code, or full computer-use supervision.
+- Official live Codex CLI, Claude Code, or GitHub Actions integrations beyond
+  the v0.5 packet proof harness.
 - Cross-agent credential broker.
 - Mobile approval companion.
 - Production packaging.
@@ -244,6 +261,7 @@ behavior.
 Key design documents:
 
 - [Development Guide](docs/development.md)
+- [Agent Packet Inbox](docs/agent-packet-inbox.md)
 - [v0.4 Packet Contract](docs/packet-contract.md)
 - [Product Brief](docs/product-brief.md)
 - [MVP Definition](docs/mvp.md)
@@ -518,6 +536,42 @@ npm run example:external-agent -- \
 
 The example GitHub Actions gate is
 `.github/workflows/wutai-verify-packet.example.yml`.
+
+## Agent Packet Inbox
+
+v0.5 adds a local inbox over work-packet history. The inbox is derived from
+stored task artifacts rather than a separate database. It reads
+`manifest.json`, `trust-verdict.json`, `provenance.json`, `policy.json`, and
+optional `retention.json`.
+
+In the app, Agent Packet Inbox supports:
+
+- search across packet id, producer, command, policy, and title
+- producer filter
+- verdict filter: `trusted`, `review_required`, `blocked`, or `no_verdict`
+- retention filter: undecided, retained, rejected
+- adapter registry review
+- current inbox export as `agent-packet-inbox.json`
+- per-packet retain/reject decisions written to `retention.json`
+
+The adapter registry is `config/wutai-adapter-registry.json`. It records
+adapter ids, packet types, signing support, proof commands, and boundary notes.
+Registry entries are descriptive; they do not grant trust.
+
+To run a packet proof for a registered external producer:
+
+```bash
+npm run example:adapter-proof -- \
+  --adapter codexCli \
+  --quiet \
+  --write-derived-artifacts \
+  -- node -e "console.log('codex proof')"
+```
+
+The v0.5 proof-harness entries for `codexCli`, `claudeCode`, and
+`githubActions` prove that Wutai can receive and verify packets from those
+producer identities. They are not official live integrations and do not imply
+runtime supervision.
 
 ## Optional Real Research Adapter
 

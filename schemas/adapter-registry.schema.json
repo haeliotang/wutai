@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/adapter-registry.schema.json",
+  "title": "Wutai Adapter Registry",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "adapters"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.adapter_registry" },
+    "adapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "adapterId",
+          "label",
+          "category",
+          "integrationStatus",
+          "packetTypes",
+          "supportsSigning",
+          "boundary"
+        ],
+        "properties": {
+          "adapterId": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "integrationStatus": {
+            "enum": ["native", "proof_harness", "external_contract", "planned"]
+          },
+          "packetTypes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "supportsSigning": { "type": "boolean" },
+          "proofCommand": { "type": "string" },
+          "boundary": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

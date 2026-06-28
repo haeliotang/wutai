@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/packet-retention-decision.schema.json",
+  "title": "Wutai Packet Retention Decision",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "taskId",
+    "generatedAt",
+    "decision",
+    "note",
+    "limitation"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.packet_retention_decision" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "packetId": { "type": "string" },
+    "producerAdapter": { "type": "string" },
+    "verdict": {
+      "enum": ["trusted", "review_required", "blocked", "no_verdict"]
+    },
+    "decision": { "enum": ["retained", "rejected"] },
+    "note": { "type": "string", "minLength": 1 },
+    "limitation": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}

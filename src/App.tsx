@@ -5,6 +5,14 @@ import {
   parseEvidenceVerification,
 } from "./domain/evidence";
 import { appendEvent, createTask, type WutaiTask } from "./domain/task";
+import {
+  buildAgentPacketInbox,
+  filterAgentPacketInbox,
+  summarizeAgentPacketInbox,
+  type AgentPacketInboxItem,
+  type AgentPacketRetentionDecision,
+} from "./runtime/agentPacketInbox";
+import { AGENT_ADAPTER_REGISTRY } from "./runtime/adapterRegistry";
 import { createResearchAdapter } from "./runtime/createResearchAdapter";
 import {
   activateResearchProviderProfile,
@@ -94,6 +102,7 @@ interface CliTraceArtifact {
 }
 
 interface WorkPacketManifestArtifact {
+  packetId?: string;
   packetType?: string;
   producer?: { adapter?: string };
   audit?: {
@@ -302,6 +311,19 @@ interface CliReviewArtifact {
   limitation?: string;
 }
 
+interface PacketRetentionArtifact {
+  schemaVersion?: number;
+  kind?: "wutai.packet_retention_decision";
+  taskId?: string;
+  generatedAt?: string;
+  packetId?: string;
+  producerAdapter?: string;
+  verdict?: "trusted" | "review_required" | "blocked" | "no_verdict";
+  decision?: AgentPacketRetentionDecision;
+  note?: string;
+  limitation?: string;
+}
+
 interface LocalFileIngestionArtifact {
   schemaVersion?: number;
   kind?: "wutai.local_file_ingestion";
@@ -357,6 +379,7 @@ function policyReviewSourceLabel(value?: string) {
 
 function trustVerdictLabel(value?: string) {
   if (value === "review_required") return "review required";
+  if (value === "no_verdict") return "no verdict";
   return value ?? "unknown";
 }
 
@@ -510,6 +533,12 @@ export default function App() {
   const [trustedProducerPolicyMessage, setTrustedProducerPolicyMessage] =
     useState<string | null>(null);
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
+  const [packetInboxQuery, setPacketInboxQuery] = useState("");
+  const [packetInboxProducer, setPacketInboxProducer] = useState("all");
+  const [packetInboxVerdict, setPacketInboxVerdict] =
+    useState<AgentPacketInboxItem["verdict"] | "all">("all");
+  const [packetInboxRetention, setPacketInboxRetention] =
+    useState<AgentPacketRetentionDecision | "all" | "undecided">("all");
   const abortRef = useRef<AbortController | null>(null);
   const cliPacketInputRef = useRef<HTMLInputElement | null>(null);
   const cliPacketDirectoryInputRef = useRef<HTMLInputElement | null>(null);
@@ -828,6 +857,13 @@ export default function App() {
     [activeTask],
   );
 
+  const retentionArtifact = useMemo(
+    () =>
+      activeTask?.artifacts.find((item) => item.name === "retention.json") ??
+      null,
+    [activeTask],
+  );
+
   const filesArtifact = useMemo(
     () => activeTask?.artifacts.find((item) => item.name === "files.json") ?? null,
     [activeTask],
@@ -887,6 +923,9 @@ export default function App() {
       review: reviewArtifact
         ? parseJsonArtifact<CliReviewArtifact>(reviewArtifact.content)
         : null,
+      retention: retentionArtifact
+        ? parseJsonArtifact<PacketRetentionArtifact>(retentionArtifact.content)
+        : null,
     };
   }, [
     auditArtifact,
@@ -896,6 +935,7 @@ export default function App() {
     policyReviewArtifact,
     provenanceArtifact,
     reviewArtifact,
+    retentionArtifact,
     traceArtifact,
     trustVerdictArtifact,
   ]);
@@ -985,6 +1025,53 @@ export default function App() {
         .length,
     }),
     [trustedProducerPolicy],
+  );
+  const agentPacketInboxItems = useMemo(
+    () => buildAgentPacketInbox(tasks, AGENT_ADAPTER_REGISTRY),
+    [tasks],
+  );
+  const agentPacketInboxSummary = useMemo(
+    () => summarizeAgentPacketInbox(agentPacketInboxItems),
+    [agentPacketInboxItems],
+  );
+  const packetInboxProducerOptions = useMemo(
+    () =>
+      [...new Set(agentPacketInboxItems.map((item) => item.producerAdapter))].sort(),
+    [agentPacketInboxItems],
+  );
+  const filteredAgentPacketInboxItems = useMemo(
+    () =>
+      filterAgentPacketInbox(agentPacketInboxItems, {
+        query: packetInboxQuery,
+        producer: packetInboxProducer,
+        verdict: packetInboxVerdict,
+        retention: packetInboxRetention,
+      }),
+    [
+      agentPacketInboxItems,
+      packetInboxProducer,
+      packetInboxQuery,
+      packetInboxRetention,
+      packetInboxVerdict,
+    ],
+  );
+  const adapterRegistryRows = useMemo(
+    () =>
+      AGENT_ADAPTER_REGISTRY.map((adapter) => ({
+        adapter,
+        packetCount: agentPacketInboxItems.filter(
+          (item) => item.producerAdapter === adapter.adapterId,
+        ).length,
+      })),
+    [agentPacketInboxItems],
+  );
+  const activeInboxItem = useMemo(
+    () =>
+      activeTask
+        ? agentPacketInboxItems.find((item) => item.taskId === activeTask.taskId) ??
+          null
+        : null,
+    [activeTask, agentPacketInboxItems],
   );
 
   async function persist(task: WutaiTask) {
@@ -1232,6 +1319,34 @@ export default function App() {
     );
   }
 
+  function openInboxPacket(taskId: string) {
+    const task = tasks.find((item) => item.taskId === taskId);
+    if (task) setActiveTask(task);
+  }
+
+  function exportInboxSummary() {
+    downloadArtifact(
+      "agent-packet-inbox.json",
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          kind: "wutai.agent_packet_inbox_export",
+          generatedAt: new Date().toISOString(),
+          filters: {
+            query: packetInboxQuery,
+            producer: packetInboxProducer,
+            verdict: packetInboxVerdict,
+            retention: packetInboxRetention,
+          },
+          summary: agentPacketInboxSummary,
+          packets: filteredAgentPacketInboxItems.map(({ searchText, ...item }) => item),
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
   async function importCliPacketFromFiles(files: FileList | null) {
     if (!taskStore || !files || files.length === 0) return;
 
@@ -1264,6 +1379,7 @@ export default function App() {
       "ledger.json",
       "audit.json",
       "attestation.json",
+      "retention.json",
     ]);
     return task.artifacts
       .filter((artifact) => names.has(artifact.name))
@@ -1271,6 +1387,60 @@ export default function App() {
         name: artifact.name,
         text: async () => artifact.content,
       }));
+  }
+
+  async function recordPacketRetention(decision: AgentPacketRetentionDecision) {
+    if (!activeTask || !taskStore || !cliPacketReview) return;
+
+    const now = new Date().toISOString();
+    const packetId = cliPacketReview.manifest.packetId ?? activeTask.taskId;
+    const retention: PacketRetentionArtifact = {
+      schemaVersion: 1,
+      kind: "wutai.packet_retention_decision",
+      taskId: activeTask.taskId,
+      generatedAt: now,
+      packetId,
+      producerAdapter:
+        cliPacketReview.provenance?.manifest?.producerAdapter ??
+        cliPacketReview.manifest.producer?.adapter,
+      verdict: cliPacketReview.trustVerdict?.verdict ?? "no_verdict",
+      decision,
+      note:
+        decision === "retained"
+          ? "Human reviewer retained this packet in the local Wutai inbox."
+          : "Human reviewer rejected this packet for local retention.",
+      limitation:
+        "This is a local retention decision over packet artifacts. It does not delete external work products or prove runtime safety.",
+    };
+    const retentionRecord: WutaiTask["artifacts"][number] = {
+      artifactId: `${activeTask.taskId}_artifact_retention_json`,
+      taskId: activeTask.taskId,
+      type: "json",
+      name: "retention.json",
+      virtualPath: `imported/${activeTask.taskId}/retention.json`,
+      content: JSON.stringify(retention, null, 2),
+      createdAt: now,
+    };
+    const withoutPriorRetention = activeTask.artifacts.filter(
+      (artifact) => artifact.name !== "retention.json",
+    );
+    let nextTask: WutaiTask = {
+      ...activeTask,
+      updatedAt: now,
+      artifacts: [...withoutPriorRetention, retentionRecord],
+    };
+    nextTask = appendEvent(nextTask, {
+      type: "ArtifactCreated",
+      summary:
+        decision === "retained"
+          ? "Packet retained in the local inbox."
+          : "Packet rejected in the local inbox.",
+      details: `retention.json records the local decision for ${packetId}.`,
+      visibility: "user",
+    });
+
+    setError(null);
+    await persist(nextTask);
   }
 
   async function enrollCurrentPacketProducerKey() {
@@ -1791,6 +1961,160 @@ export default function App() {
               </div>
             </section>
           )}
+          <section className="agent-inbox" aria-label="Agent Packet Inbox">
+            <div className="panel-header">
+              <div>
+                <h2>Agent Packet Inbox</h2>
+                <p>
+                  Local packet index across Wutai, external adapters, and proof
+                  harness producers.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={exportInboxSummary}
+                disabled={filteredAgentPacketInboxItems.length === 0}
+              >
+                Export inbox
+              </button>
+            </div>
+            <div className="agent-inbox-metrics">
+              <span>
+                Packets <strong>{agentPacketInboxSummary.total}</strong>
+              </span>
+              <span>
+                Producers <strong>{agentPacketInboxSummary.producers}</strong>
+              </span>
+              <span>
+                Trusted <strong>{agentPacketInboxSummary.trusted}</strong>
+              </span>
+              <span>
+                Review <strong>{agentPacketInboxSummary.reviewRequired}</strong>
+              </span>
+              <span>
+                Blocked <strong>{agentPacketInboxSummary.blocked}</strong>
+              </span>
+              <span>
+                Retained <strong>{agentPacketInboxSummary.retained}</strong>
+              </span>
+            </div>
+            <div className="agent-inbox-filters" aria-label="Agent Packet Inbox filters">
+              <label>
+                <span>Search</span>
+                <input
+                  value={packetInboxQuery}
+                  onChange={(event) => setPacketInboxQuery(event.target.value)}
+                  placeholder="producer, command, packet id"
+                />
+              </label>
+              <label>
+                <span>Producer</span>
+                <select
+                  value={packetInboxProducer}
+                  onChange={(event) => setPacketInboxProducer(event.target.value)}
+                >
+                  <option value="all">All producers</option>
+                  {packetInboxProducerOptions.map((producer) => (
+                    <option key={producer} value={producer}>
+                      {producer}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Verdict</span>
+                <select
+                  value={packetInboxVerdict}
+                  onChange={(event) =>
+                    setPacketInboxVerdict(
+                      event.target.value as AgentPacketInboxItem["verdict"] | "all",
+                    )
+                  }
+                >
+                  <option value="all">All verdicts</option>
+                  <option value="trusted">Trusted</option>
+                  <option value="review_required">Review required</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="no_verdict">No verdict</option>
+                </select>
+              </label>
+              <label>
+                <span>Retention</span>
+                <select
+                  value={packetInboxRetention}
+                  onChange={(event) =>
+                    setPacketInboxRetention(
+                      event.target.value as
+                        | AgentPacketRetentionDecision
+                        | "all"
+                        | "undecided",
+                    )
+                  }
+                >
+                  <option value="all">All retention</option>
+                  <option value="undecided">Undecided</option>
+                  <option value="retained">Retained</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+            </div>
+            <div className="agent-inbox-list">
+              {filteredAgentPacketInboxItems.length === 0 ? (
+                <p className="muted">No packet matches the current inbox filters.</p>
+              ) : (
+                filteredAgentPacketInboxItems.map((item) => (
+                  <button
+                    key={item.taskId}
+                    type="button"
+                    className={
+                      activeTask?.taskId === item.taskId
+                        ? "agent-inbox-row agent-inbox-row-active"
+                        : "agent-inbox-row"
+                    }
+                    onClick={() => openInboxPacket(item.taskId)}
+                  >
+                    <span
+                      className={`agent-inbox-verdict agent-inbox-verdict-${item.verdict}`}
+                    >
+                      {trustVerdictLabel(item.verdict)}
+                    </span>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>
+                        {item.producerLabel} / {item.packetType}
+                        {item.command ? ` / ${item.command}` : ""}
+                      </p>
+                    </div>
+                    <span className="agent-inbox-secondary">
+                      {item.retentionDecision ?? "undecided"}
+                    </span>
+                    <span className="agent-inbox-secondary">
+                      {item.provenanceStatus ?? item.integrityStatus ?? "unverified"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+            <details className="adapter-registry" aria-label="Adapter Registry">
+              <summary>
+                Adapter Registry <strong>{AGENT_ADAPTER_REGISTRY.length}</strong>
+              </summary>
+              <div className="adapter-registry-grid">
+                {adapterRegistryRows.map(({ adapter, packetCount }) => (
+                  <div key={adapter.adapterId}>
+                    <span>{adapter.integrationStatus}</span>
+                    <strong>{adapter.label}</strong>
+                    <code>{adapter.adapterId}</code>
+                    <p>{adapter.boundary}</p>
+                    <small>
+                      {packetCount} packet{packetCount === 1 ? "" : "s"} /{" "}
+                      {adapter.supportsSigning ? "signing capable" : "unsigned"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </section>
           {error && <p className="error-text">{error}</p>}
 
           {shouldShowResearchSetup && (
@@ -2298,6 +2622,60 @@ export default function App() {
                       cliPacketReview.manifest.session?.command ??
                       "Command unavailable"}
                   </p>
+                  <div className="retention-panel" aria-label="Packet Retention">
+                    <div className="panel-header">
+                      <h3>Packet Retention</h3>
+                      <strong>
+                        {cliPacketReview.retention?.decision ?? "undecided"}
+                      </strong>
+                    </div>
+                    <p>
+                      {cliPacketReview.retention?.note ??
+                        "Record whether this packet should be retained as useful local evidence or rejected from downstream use."}
+                    </p>
+                    <div className="dry-run-review-actions">
+                      <button
+                        type="button"
+                        onClick={() => void recordPacketRetention("retained")}
+                      >
+                        Retain packet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void recordPacketRetention("rejected")}
+                      >
+                        Reject packet
+                      </button>
+                      {activeInboxItem && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadArtifact(
+                              "agent-packet-summary.json",
+                              JSON.stringify(
+                                {
+                                  schemaVersion: 1,
+                                  kind: "wutai.agent_packet_summary",
+                                  generatedAt: new Date().toISOString(),
+                                  packet: {
+                                    ...activeInboxItem,
+                                    searchText: undefined,
+                                  },
+                                },
+                                null,
+                                2,
+                              ),
+                            )
+                          }
+                        >
+                          Export summary
+                        </button>
+                      )}
+                    </div>
+                    {cliPacketReview.retention?.limitation && (
+                      <p className="muted">{cliPacketReview.retention.limitation}</p>
+                    )}
+                  </div>
                   {cliPacketReview.trustVerdict && (
                     <div
                       className={`trust-verdict-panel trust-verdict-${cliPacketReview.trustVerdict.verdict ?? "review_required"}`}
@@ -2754,6 +3132,7 @@ export default function App() {
                       policyReviewArtifact,
                       trustVerdictArtifact,
                       reviewArtifact,
+                      retentionArtifact,
                     ]
                       .filter(Boolean)
                       .map((artifact) => (
