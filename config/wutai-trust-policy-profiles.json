@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.trust_policy_profile_config",
+  "defaultProfile": "personal-default",
+  "profiles": {
+    "personal-default": {
+      "schemaVersion": 1,
+      "kind": "wutai.trust_policy",
+      "policyId": "personal-default",
+      "requireTrustedProducerForTrusted": true,
+      "defaultUnsignedAction": "review",
+      "defaultPolicyWarningAction": "review",
+      "defaultHighRiskAllowAction": "review",
+      "defaultMissingRationaleAction": "review",
+      "rulePolicies": {
+        "shell_interpreter_command_string": {
+          "action": "review",
+          "requireRationale": true,
+          "note": "Shell command strings need explicit local review."
+        },
+        "dependency_install_or_update": {
+          "action": "review",
+          "note": "Dependency mutation should be reviewed before local trust."
+        }
+      }
+    },
+    "strict-local": {
+      "schemaVersion": 1,
+      "kind": "wutai.trust_policy",
+      "policyId": "strict-local",
+      "requireTrustedProducerForTrusted": true,
+      "defaultUnsignedAction": "block",
+      "defaultPolicyWarningAction": "block",
+      "defaultHighRiskAllowAction": "block",
+      "defaultMissingRationaleAction": "block",
+      "rulePolicies": {
+        "shell_interpreter_command_string": {
+          "action": "block",
+          "requireRationale": true,
+          "requireTrustedProducer": true,
+          "note": "Strict local mode blocks shell command strings unless a future adapter adds a stronger approval path."
+        },
+        "dependency_install_or_update": {
+          "action": "review",
+          "requireRationale": true,
+          "note": "Dependency mutation cannot be silently trusted in strict local mode."
+        },
+        "environment_dump": {
+          "action": "block",
+          "note": "Environment dumps can expose credentials and are blocked in strict local mode."
+        }
+      }
+    },
+    "ci-review": {
+      "schemaVersion": 1,
+      "kind": "wutai.trust_policy",
+      "policyId": "ci-review",
+      "requireTrustedProducerForTrusted": false,
+      "defaultUnsignedAction": "review",
+      "defaultPolicyWarningAction": "review",
+      "defaultHighRiskAllowAction": "block",
+      "defaultMissingRationaleAction": "block",
+      "rulePolicies": {
+        "shell_interpreter_command_string": {
+          "action": "block",
+          "note": "CI should not accept shell command strings without a repository-specific exception."
+        },
+        "destructive_git_operation": {
+          "action": "block",
+          "note": "CI should fail packets that recorded destructive git operations."
+        },
+        "dependency_install_or_update": {
+          "action": "review",
+          "note": "CI records dependency mutation as a review gate instead of silently trusting it."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/session-audit.schema.json",
+  "title": "Wutai Session Audit",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "taskId",
+    "generatedAt",
+    "permissions",
+    "policy",
+    "events"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.session_audit" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "permissions": { "type": "array" },
+    "policy": { "type": "object" },
+    "events": { "type": "array" },
+    "executionMode": { "type": "string" },
+    "toolCalls": { "type": "array" },
+    "runtimeEvents": { "type": "array" },
+    "credentialGrants": { "type": "array" }
+  },
+  "additionalProperties": true
+}

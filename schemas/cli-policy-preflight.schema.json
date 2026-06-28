@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/cli-policy-preflight.schema.json",
+  "title": "Wutai Local Script Policy Preflight",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "policyVersion",
+    "decision",
+    "matchedRules",
+    "riskProfile",
+    "taskId",
+    "generatedAt",
+    "command",
+    "argv",
+    "workingDirectory",
+    "executionMode"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.cli_policy_preflight" },
+    "policyVersion": { "type": "string", "minLength": 1 },
+    "profile": { "type": "object" },
+    "engine": { "type": "object" },
+    "decision": {
+      "enum": ["allow", "allow_with_warnings", "pending_review", "deny"]
+    },
+    "highestSeverity": {
+      "enum": ["none", "low", "medium", "high", "critical"]
+    },
+    "allowHighRisk": { "type": "boolean" },
+    "override": { "type": "object" },
+    "matchedRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ruleId"],
+        "properties": {
+          "ruleId": { "type": "string", "minLength": 1 },
+          "category": { "type": "string" },
+          "severity": { "type": "string" },
+          "defaultAction": { "type": "string" },
+          "effectiveAction": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "riskProfile": { "type": "object" },
+    "decisionRationale": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reviewScope": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "summary": { "type": "string" },
+    "limitation": { "type": "string" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "command": { "type": "string", "minLength": 1 },
+    "argv": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "workingDirectory": { "type": "string" },
+    "executionMode": { "enum": ["execute", "dry_run"] },
+    "dryRun": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

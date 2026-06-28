@@ -1101,7 +1101,7 @@ export async function importCliPacketFiles(
   const manifestContent = contentByName.get("manifest.json");
 
   if (!manifestContent) {
-    throw new Error("Select manifest.json from a Wutai CLI packet.");
+    throw new Error("Select manifest.json from a Wutai local-script packet.");
   }
 
   const manifest = parseJson<WorkPacketManifest>(
@@ -1111,9 +1111,9 @@ export async function importCliPacketFiles(
   if (
     manifest.kind !== "wutai.work_packet_manifest" ||
     manifest.packetType !== "local_script" ||
-    manifest.producer?.adapter !== "wutaiRunCli"
+    !manifest.producer?.adapter
   ) {
-    throw new Error("This is not a Wutai CLI wrapper packet manifest.");
+    throw new Error("This is not a Wutai local-script packet manifest.");
   }
 
   const taskId = manifest.taskId || `cli_import_${Date.now().toString(36)}`;

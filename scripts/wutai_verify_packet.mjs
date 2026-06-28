@@ -3,6 +3,7 @@ import { createHash, verify as verifyData } from "node:crypto";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import {
   buildTrustVerdictArtifact,
   DEFAULT_TRUST_POLICY,
@@ -21,6 +22,11 @@ const REQUIRED_CLI_PACKET_ARTIFACTS = [
   "ledger.json",
   "audit.json",
 ];
+const DEFAULT_TRUST_POLICY_PROFILE = "personal-default";
+const DEFAULT_TRUST_POLICY_PROFILES_URL = new URL(
+  "../config/wutai-trust-policy-profiles.json",
+  import.meta.url,
+);
 const EMPTY_TRUSTED_PRODUCER_POLICY = {
   schemaVersion: 1,
   kind: "wutai.trusted_producer_policy",
@@ -37,6 +43,7 @@ function usage() {
 Options:
   --trusted-producers <path>  Trusted producer policy JSON.
   --trust-policy <path>       Trust verdict policy JSON.
+  --trust-policy-profile <id> Trust policy profile. Default: personal-default.
   --write-artifacts           Write integrity/provenance/policy-review/trust-verdict artifacts into the packet directory.
   --help                      Show this message.
 
@@ -48,6 +55,7 @@ function parseArgs(argv) {
   const options = {
     trustedProducers: null,
     trustPolicy: null,
+    trustPolicyProfile: null,
     writeArtifacts: false,
     help: false,
     packetDir: null,
@@ -65,6 +73,10 @@ function parseArgs(argv) {
       index += 1;
       if (!argv[index]) throw new Error("--trust-policy requires a value.");
       options.trustPolicy = argv[index];
+    } else if (arg === "--trust-policy-profile") {
+      index += 1;
+      if (!argv[index]) throw new Error("--trust-policy-profile requires a value.");
+      options.trustPolicyProfile = argv[index];
     } else if (arg === "--write-artifacts") {
       options.writeArtifacts = true;
     } else if (arg.startsWith("--")) {
@@ -882,12 +894,57 @@ async function loadTrustedProducerPolicy(path) {
   );
 }
 
-async function loadTrustPolicy(path) {
-  if (!path) return DEFAULT_TRUST_POLICY;
+async function loadTrustPolicyProfile(profileId) {
+  const sourcePath = fileURLToPath(DEFAULT_TRUST_POLICY_PROFILES_URL);
+  const requestedProfileId = profileId ?? DEFAULT_TRUST_POLICY_PROFILE;
+  let root;
+  try {
+    root = parseJson(await readFile(sourcePath, "utf8"), sourcePath);
+  } catch (error) {
+    if (requestedProfileId === DEFAULT_TRUST_POLICY_PROFILE) {
+      return DEFAULT_TRUST_POLICY;
+    }
+    throw error;
+  }
+  if (
+    !root ||
+    typeof root !== "object" ||
+    Array.isArray(root) ||
+    root.kind !== "wutai.trust_policy_profile_config" ||
+    !root.profiles ||
+    typeof root.profiles !== "object" ||
+    Array.isArray(root.profiles)
+  ) {
+    throw new Error(`${sourcePath} must define a wutai.trust_policy_profile_config.`);
+  }
+
+  const selectedProfileId = profileId ?? root.defaultProfile ?? requestedProfileId;
+  const profile = root.profiles[selectedProfileId];
+  if (!profile) {
+    throw new Error(
+      `Unknown trust policy profile: ${selectedProfileId}. Expected one of ${Object.keys(root.profiles).join(", ")}.`,
+    );
+  }
   return normalizeTrustPolicy(
-    parseJson(await readFile(resolve(path), "utf8"), basename(path)),
-    basename(path),
+    {
+      ...profile,
+      policyId: profile.policyId ?? selectedProfileId,
+    },
+    `profile:${selectedProfileId}`,
   );
+}
+
+async function loadTrustPolicy({ path, profile }) {
+  if (path && profile) {
+    throw new Error("--trust-policy and --trust-policy-profile cannot be used together.");
+  }
+  if (path) {
+    return normalizeTrustPolicy(
+      parseJson(await readFile(resolve(path), "utf8"), basename(path)),
+      basename(path),
+    );
+  }
+  return loadTrustPolicyProfile(profile ?? null);
 }
 
 export async function verifyPacketDirectory(packetDir, options = {}) {
@@ -901,9 +958,9 @@ export async function verifyPacketDirectory(packetDir, options = {}) {
   if (
     manifest.kind !== "wutai.work_packet_manifest" ||
     manifest.packetType !== "local_script" ||
-    manifest.producer?.adapter !== "wutaiRunCli"
+    !manifest.producer?.adapter
   ) {
-    throw new Error("This is not a Wutai CLI wrapper packet manifest.");
+    throw new Error("This is not a Wutai local-script packet manifest.");
   }
 
   const taskId = manifest.taskId || `cli_verify_${Date.now().toString(36)}`;
@@ -911,7 +968,10 @@ export async function verifyPacketDirectory(packetDir, options = {}) {
   const trustedProducerPolicy = await loadTrustedProducerPolicy(
     options.trustedProducers,
   );
-  const trustPolicy = await loadTrustPolicy(options.trustPolicy);
+  const trustPolicy = await loadTrustPolicy({
+    path: options.trustPolicy,
+    profile: options.trustPolicyProfile,
+  });
   const integrity = buildIntegrityArtifact(
     taskId,
     generatedAt,

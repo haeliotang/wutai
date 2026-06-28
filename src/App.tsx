@@ -860,7 +860,7 @@ export default function App() {
     );
     if (
       manifest?.packetType !== "local_script" ||
-      manifest.producer?.adapter !== "wutaiRunCli"
+      !manifest.producer?.adapter
     ) {
       return null;
     }

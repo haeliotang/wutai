@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/local-script-trace.schema.json",
+  "title": "Wutai Local Script Trace",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "taskId",
+    "generatedAt",
+    "captureMode",
+    "command",
+    "argv",
+    "workingDirectory",
+    "executed",
+    "exitCode"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.local_script_trace" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "captureMode": {
+      "enum": ["cli_wrapper", "external_agent_adapter", "imported_trace"]
+    },
+    "command": { "type": "string", "minLength": 1 },
+    "argv": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "workingDirectory": { "type": "string" },
+    "dryRun": { "type": "boolean" },
+    "executed": { "type": "boolean" },
+    "startedAt": { "type": "string" },
+    "completedAt": { "type": "string" },
+    "exitCode": { "type": ["integer", "null"] },
+    "stdoutSummary": { "type": "string" },
+    "stderrSummary": { "type": "string" },
+    "touchedFiles": { "type": "array" },
+    "producedArtifacts": { "type": "array" }
+  },
+  "additionalProperties": true
+}

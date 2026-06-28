@@ -1,0 +1,35 @@
+name: Wutai Verify Packet Example
+
+on:
+  workflow_dispatch:
+    inputs:
+      packet-dir:
+        description: Packet directory to verify
+        required: true
+        default: artifacts/external-agent/latest
+      trust-policy-profile:
+        description: Wutai trust policy profile
+        required: true
+        default: ci-review
+
+jobs:
+  verify-packet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Wutai packet
+        run: |
+          npm run wutai:verify -- \
+            --trust-policy-profile "${{ inputs.trust-policy-profile }}" \
+            "${{ inputs.packet-dir }}"

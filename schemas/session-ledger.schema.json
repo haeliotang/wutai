@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/session-ledger.schema.json",
+  "title": "Wutai Session Ledger",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "task", "generatedAt"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.session_ledger" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "task": {
+      "type": "object",
+      "required": ["taskId", "status", "events", "permissions"],
+      "properties": {
+        "taskId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "status": { "type": "string" },
+        "events": { "type": "array" },
+        "permissions": { "type": "array" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

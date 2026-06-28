@@ -11,14 +11,15 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.2 foundation in progress. The current code implements
-> one supervised research workflow, a v0.2 work-packet manifest, and a
+> Repository status: v0.4 external integration contract. The current code
+> implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
-> not yet
-> sandbox commands, enforce a general permission broker, or supervise arbitrary
-> external agents, browser-control runtimes, live MCP sessions, live coding
-> agents, or full computer-use sessions.
+> not yet sandbox commands, enforce a general permission broker, or supervise
+> arbitrary external agents, browser-control runtimes, live MCP sessions, live
+> coding agents, or full computer-use sessions. v0.4 adds a packet-level
+> contract so external agents can hand work to Wutai for local verification
+> without implying Wutai controlled their runtime.
 
 ## Why This Exists
 
@@ -43,7 +44,9 @@ that records, scopes, and verifies agentic work.
 The v0.1 scaffold proves this loop with a bounded research workflow. The v0.2
 foundation extends the work-packet model with local-script trace import,
 coding-agent trace import, MCP tool-call trace import, local file ingestion,
-and a developer CLI wrapper:
+and a developer CLI wrapper. v0.4 adds an External Agent Integration Contract:
+third-party agents and wrappers can write Wutai-compatible local-script packets,
+then call the same local verifier and trust policy gate that Wutai uses.
 
 ```text
 natural-language task
@@ -111,6 +114,17 @@ Implemented:
   `npm run wutai:verify -- <packet-dir>`. The verifier emits machine-readable
   `trust-verdict.json` and can optionally write derived review artifacts back
   into the packet directory.
+- External Agent Integration Contract v0.4. Non-Wutai local-script producers can
+  generate reviewable packets through `sdk/node`, `examples/external-agent-wrapper.mjs`,
+  and the schemas under `schemas/`. The verifier now accepts any
+  `local_script` packet with a declared `producer.adapter`; local trust still
+  depends on hash checks, optional attestation, trusted-producer policy, and
+  trust-policy profiles.
+- Built-in verifier trust-policy profiles in
+  `config/wutai-trust-policy-profiles.json`: `personal-default`,
+  `strict-local`, and `ci-review`.
+- Example GitHub Actions packet-verification gate in
+  `.github/workflows/wutai-verify-packet.example.yml`.
 
 Each completed research task writes a local work packet:
 
@@ -172,6 +186,18 @@ audit.json
 attestation.json   # optional, only when --signing-key is supplied
 ```
 
+Each external-agent SDK packet writes the same local-script contract:
+
+```text
+manifest.json
+report.md
+policy.json
+trace.json
+ledger.json
+audit.json
+attestation.json   # optional, only when a signing key is supplied
+```
+
 Each imported CLI wrapper packet also gets local review-side artifacts:
 
 ```text
@@ -218,6 +244,7 @@ behavior.
 Key design documents:
 
 - [Development Guide](docs/development.md)
+- [v0.4 Packet Contract](docs/packet-contract.md)
 - [Product Brief](docs/product-brief.md)
 - [MVP Definition](docs/mvp.md)
 - [Architecture](docs/architecture.md)
@@ -398,6 +425,24 @@ npm run wutai:verify -- \
   ./artifacts/cli/<session_id>
 ```
 
+The verifier loads `personal-default` from
+`config/wutai-trust-policy-profiles.json` unless a profile or explicit policy is
+provided. Built-in profiles:
+
+```text
+personal-default  unsigned and warning-bearing packets require review
+strict-local      unsigned packets and policy warnings block by default
+ci-review         CI-oriented profile; high-risk allow and missing rationale block
+```
+
+Select a profile with:
+
+```bash
+npm run wutai:verify -- \
+  --trust-policy-profile strict-local \
+  ./artifacts/cli/<session_id>
+```
+
 To apply a rule-level trust policy, pass `--trust-policy <path>`. This is
 separate from the CLI execution policy. Execution policy decides whether the
 wrapper should run a command; trust policy decides whether a produced packet can
@@ -423,6 +468,56 @@ To persist the verifier's derived artifacts beside the packet:
 ```bash
 npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
 ```
+
+## External Agent Integration Contract
+
+v0.4 lets an external agent runtime produce a Wutai packet without pretending
+that Wutai controlled that runtime. The contract is documented in
+`docs/packet-contract.md`; stable schemas live in `schemas/`.
+
+Use the Node SDK when another tool already ran the work and needs to hand Wutai
+a packet:
+
+```js
+import { createPacket, writePacket, verifyPacket } from "wutai/node";
+
+const packet = createPacket({
+  argv: ["node", "-e", "console.log('hello')"],
+  exitCode: 0,
+  stdoutSummary: "hello",
+  stderrSummary: "No output captured.",
+  producer: {
+    name: "my-agent",
+    adapter: "myAgentAdapter",
+    runtime: "node"
+  }
+});
+
+const { packetDir } = await writePacket(packet);
+const { trustVerdict } = await verifyPacket(packetDir, {
+  trustPolicyProfile: "personal-default"
+});
+```
+
+Use the wrapper example when you want a minimal external adapter that runs a
+command, writes a packet, verifies it, and exits with the trust-verdict code:
+
+```bash
+npm run example:external-agent -- --quiet -- node -e "console.log('external')"
+```
+
+For stricter local or CI gates:
+
+```bash
+npm run example:external-agent -- \
+  --quiet \
+  --write-derived-artifacts \
+  --trust-policy-profile ci-review \
+  -- npm run test:evidence
+```
+
+The example GitHub Actions gate is
+`.github/workflows/wutai-verify-packet.example.yml`.
 
 ## Optional Real Research Adapter
 
