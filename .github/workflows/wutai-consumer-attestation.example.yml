@@ -1,0 +1,45 @@
+name: Wutai Consumer Attestation Gate Example
+
+on:
+  workflow_dispatch:
+    inputs:
+      packet-dir:
+        description: "Packet directory to verify and ratify"
+        required: true
+        default: "artifacts/consumer-proof/latest"
+      attestation:
+        description: "Optional consumer-attestation.json path"
+        required: false
+        default: ""
+      disallow-reviewer:
+        description: "Reviewer id that cannot satisfy this gate"
+        required: true
+        default: "haeliotang"
+
+jobs:
+  consumer-attestation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify packet and require consumer ratification
+        shell: bash
+        env:
+          PACKET_DIR: ${{ inputs.packet-dir }}
+          ATTESTATION_PATH: ${{ inputs.attestation }}
+          DISALLOW_REVIEWER: ${{ inputs.disallow-reviewer }}
+        run: |
+          ATTESTATION_ARG=()
+          if [ -n "$ATTESTATION_PATH" ]; then
+            ATTESTATION_ARG=(--attestation "$ATTESTATION_PATH")
+          fi
+
+          npm run wutai:attest -- \
+            --write-artifacts \
+            --disallow-reviewer "$DISALLOW_REVIEWER" \
+            "${ATTESTATION_ARG[@]}" \
+            "$PACKET_DIR"

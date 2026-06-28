@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.consumer_attestation",
+  "subject": {
+    "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "packetId": "packet_example",
+    "taskId": "task_example",
+    "producerAdapter": "externalAgentExample"
+  },
+  "reviewer": {
+    "id": "external-reviewer",
+    "name": "External Reviewer",
+    "role": "maintainer",
+    "source": "github_review"
+  },
+  "decision": "ratified",
+  "reviewedAt": "2026-06-28T00:00:00.000Z",
+  "statement": "I reviewed the packet artifacts and ratify this result for the stated task."
+}

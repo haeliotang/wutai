@@ -11,7 +11,7 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.5 agent packet inbox. The current code
+> Repository status: v0.6 consumer attestation gate. The current code
 > implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
@@ -20,7 +20,10 @@ auditable, stoppable, and reviewable.
 > coding agents, or full computer-use sessions. v0.5 adds a local Agent Packet
 > Inbox over the packet contract, so external-agent work can be collected,
 > filtered, explained, retained, or rejected without implying Wutai controlled
-> the original runtime.
+> the original runtime. v0.6 adds a CLI/CI consumer attestation gate that
+> re-verifies a packet and requires a non-self `ratified` review bound to the
+> packet manifest hash. It does not prove reviewer identity or external demand
+> by itself.
 
 ## Why This Exists
 
@@ -48,7 +51,9 @@ coding-agent trace import, MCP tool-call trace import, local file ingestion,
 and a developer CLI wrapper. v0.4 adds an External Agent Integration Contract:
 third-party agents and wrappers can write Wutai-compatible local-script packets,
 then call the same local verifier and trust policy gate that Wutai uses. v0.5
-turns those packets into a local inbox for review and retention.
+turns those packets into a local inbox for review and retention. v0.6 adds a
+consumer attestation gate for requiring a second, non-self ratification over a
+packet before it passes CI or another local acceptance gate.
 
 ```text
 natural-language task
@@ -127,6 +132,13 @@ Implemented:
   `strict-local`, and `ci-review`.
 - Example GitHub Actions packet-verification gate in
   `.github/workflows/wutai-verify-packet.example.yml`.
+- Consumer Attestation Gate v0.6. `wutai attest-packet` /
+  `npm run wutai:attest -- <packet-dir>` re-runs packet verification, reads a
+  `consumer-attestation.json`, requires `decision: "ratified"`, rejects
+  caller-disallowed reviewer ids, binds the review to the current
+  `manifest.json` SHA-256, and can write `consumer-attestation-check.json`.
+- Example GitHub Actions consumer-attestation gate in
+  `.github/workflows/wutai-consumer-attestation.example.yml`.
 - Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
   history, indexes packet producer, packet type, trust verdict, provenance,
   policy decision, attestation state, and retention state, and supports search,
@@ -229,6 +241,13 @@ Wutai also writes a local review artifact:
 review.json
 ```
 
+If a packet is ratified by a consumer attestation gate, Wutai may also write:
+
+```text
+consumer-attestation.json
+consumer-attestation-check.json
+```
+
 Not implemented:
 
 - Runtime-enforced supervised sessions for arbitrary external agents.
@@ -237,6 +256,10 @@ Not implemented:
 - Browser-use, Codex, Claude Code, or full computer-use supervision.
 - Official live Codex CLI, Claude Code, or GitHub Actions integrations beyond
   the v0.5 packet proof harness.
+- Cryptographic consumer-reviewer identity proof or automatic GitHub PR
+  reviewer extraction.
+- Proof that non-author users already want to perform this attestation; v0.6
+  only provides the gate needed to test that behavior.
 - Cross-agent credential broker.
 - Mobile approval companion.
 - Production packaging.
@@ -261,6 +284,7 @@ behavior.
 Key design documents:
 
 - [Development Guide](docs/development.md)
+- [Consumer Attestation Gate](docs/consumer-attestation-gate.md)
 - [Agent Packet Inbox](docs/agent-packet-inbox.md)
 - [v0.4 Packet Contract](docs/packet-contract.md)
 - [Product Brief](docs/product-brief.md)
@@ -486,6 +510,43 @@ To persist the verifier's derived artifacts beside the packet:
 ```bash
 npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
 ```
+
+## Consumer Attestation Gate
+
+v0.6 adds a post-hoc gate for the question Wutai most needs to test: did a
+non-author reviewer actually consume and ratify this packet?
+
+Create or supply a `consumer-attestation.json` that binds to the current
+`manifest.json` SHA-256, packet id, task id, and producer adapter. Then run:
+
+```bash
+npm run wutai:attest -- \
+  --disallow-reviewer haeliotang \
+  ./artifacts/cli/<session_id>
+```
+
+The unified entrypoint is equivalent:
+
+```bash
+npm run wutai -- attest-packet \
+  --disallow-reviewer haeliotang \
+  ./artifacts/cli/<session_id>
+```
+
+To write the derived gate artifact:
+
+```bash
+npm run wutai:attest -- \
+  --write-artifacts \
+  --disallow-reviewer haeliotang \
+  ./artifacts/cli/<session_id>
+```
+
+The gate re-runs packet verification first. It fails if the packet is blocked,
+if the reviewer is missing or self-disallowed, if the decision is not
+`ratified`, or if the attestation points at a stale manifest hash. This is a
+review accountability gate, not reviewer identity proof, runtime supervision,
+or evidence that outside users already want to do the review.
 
 ## External Agent Integration Contract
 

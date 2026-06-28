@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { runConsumerAttestationGateCli } from "./wutai_attestation_gate.mjs";
 import { runVerifyPacketCli } from "./wutai_verify_packet.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -10,9 +11,10 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 function usage() {
   return `Usage:
   wutai verify-packet [options] <packet-dir>
+  wutai attest-packet [options] <packet-dir>
   wutai run [options] -- <command> [args...]
 
-Use "wutai verify-packet --help" or "wutai run --help" for command-specific options.`;
+Use "wutai verify-packet --help", "wutai attest-packet --help", or "wutai run --help" for command-specific options.`;
 }
 
 function runNodeScript(scriptName, args) {
@@ -33,6 +35,9 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === "verify-packet") {
     return runVerifyPacketCli(args);
+  }
+  if (command === "attest-packet") {
+    return runConsumerAttestationGateCli(args);
   }
   if (command === "run") {
     return runNodeScript("wutai_run.mjs", args);

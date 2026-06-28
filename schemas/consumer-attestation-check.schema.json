@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/consumer-attestation-check.schema.json",
+  "title": "Wutai Consumer Attestation Check",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "taskId",
+    "generatedAt",
+    "status",
+    "packet",
+    "reviewer",
+    "policy",
+    "checks",
+    "limitation"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.consumer_attestation_check" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["passed", "failed"] },
+    "summary": { "type": "string" },
+    "packet": {
+      "type": "object",
+      "required": ["packetId", "packetType", "producerAdapter", "manifestSha256", "trustVerdict"],
+      "properties": {
+        "packetId": { "type": "string", "minLength": 1 },
+        "packetType": { "type": "string", "minLength": 1 },
+        "producerAdapter": { "type": "string", "minLength": 1 },
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "trustVerdict": { "enum": ["trusted", "review_required", "blocked"] }
+      },
+      "additionalProperties": true
+    },
+    "reviewer": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "policy": {
+      "type": "object",
+      "required": ["requiredDecision", "disallowedReviewers", "blockedPacketAction"],
+      "properties": {
+        "requiredDecision": { "const": "ratified" },
+        "disallowedReviewers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "blockedPacketAction": { "const": "fail" }
+      },
+      "additionalProperties": true
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "message"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed"] },
+          "message": { "type": "string" },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "limitation": { "type": "string" }
+  },
+  "additionalProperties": true
+}

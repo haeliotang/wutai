@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/consumer-attestation.schema.json",
+  "title": "Wutai Consumer Attestation",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "subject",
+    "reviewer",
+    "decision",
+    "reviewedAt",
+    "statement"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.consumer_attestation" },
+    "subject": {
+      "type": "object",
+      "required": ["manifestSha256", "packetId", "taskId", "producerAdapter"],
+      "properties": {
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "packetId": { "type": "string", "minLength": 1 },
+        "taskId": { "type": "string", "minLength": 1 },
+        "producerAdapter": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "reviewer": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "decision": {
+      "enum": ["ratified", "rejected", "needs_changes"]
+    },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "statement": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}
