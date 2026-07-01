@@ -54,6 +54,8 @@ the same packet id and manifest hash.
 
 The packet verifier blocked the packet, or the attention policy requires an
 accountable seat for auto acceptance and no matching seat is configured.
+Missing accountable-seat evidence is still recorded as an audit reason even
+when policy is configured to permit auto acceptance without a seat.
 
 ## Permission Basis Typing
 
@@ -174,6 +176,7 @@ The example policy is `config/wutai-attention-policy.example.json`.
     "untrusted_producer": "maintainer",
     "high_risk_allow": "security_reviewer",
     "accountable_seat_missing": "owner",
+    "accountable_seat_required": "owner",
     "permission_basis_missing": "owner",
     "model_backed_external_check": "maintainer"
   }
@@ -194,6 +197,9 @@ Implemented:
 - Policy-backed accountable-seat matching by packet type or producer adapter.
 - Explicit `no_human_review` audit signal when no scoped ratification is
   accepted.
+- Built-in policy requires an accountable seat for auto acceptance by default.
+- Missing accountable-seat evidence is recorded as an audit reason even when
+  the selected policy does not require it for auto acceptance.
 - `permissionBasis[]` and `riskSignals[]` split in `attention-decision.json`.
 - Auto acceptance requires at least one grant-eligible permission basis.
 - Deterministic external checks can grant permission only when they pass.

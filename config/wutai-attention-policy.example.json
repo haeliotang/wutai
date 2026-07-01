@@ -34,6 +34,7 @@
     "reviewer_required": "maintainer",
     "scoped_ratification_missing": "maintainer",
     "accountable_seat_missing": "owner",
+    "accountable_seat_required": "owner",
     "permission_basis_missing": "owner",
     "model_backed_external_check": "maintainer",
     "packet_blocked": "owner"

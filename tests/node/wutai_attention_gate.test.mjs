@@ -256,6 +256,71 @@ test("attention decision auto accepts trusted packets under policy while recordi
   );
 });
 
+test("built-in attention policy requires an accountable seat for auto acceptance", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-attention-default-seat-"));
+  const { packetDir, trustedProducersPath } = await createSignedPacket(outputRoot);
+
+  const { result, decision } = runAttention(packetDir, [
+    "--trusted-producers",
+    trustedProducersPath,
+  ]);
+
+  assert.equal(result.status, 20);
+  assert.equal(decision.decision, "blocked_or_unowned");
+  assert.equal(decision.policy.requireAccountableSeatForAutoAccept, true);
+  assert.equal(decision.accountability.accountableSeatStatus, "missing");
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) =>
+        reason.id === "accountable_seat_missing" && reason.severity === "audit",
+    ),
+    true,
+  );
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) =>
+        reason.id === "accountable_seat_required" &&
+        reason.severity === "blocker",
+    ),
+    true,
+  );
+});
+
+test("missing accountable seat remains auditable when policy permits auto acceptance", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-attention-audit-seat-"));
+  const policyRoot = await mkdtemp(join(tmpdir(), "wutai-attention-audit-policy-"));
+  const { packetDir, trustedProducersPath } = await createSignedPacket(outputRoot);
+  const policyPath = await writeAttentionPolicy(policyRoot, {
+    autoAcceptTrusted: true,
+    requireAccountableSeatForAutoAccept: false,
+    accountableSeats: [],
+  });
+
+  const { result, decision } = runAttention(packetDir, [
+    "--trusted-producers",
+    trustedProducersPath,
+    "--attention-policy",
+    policyPath,
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(decision.decision, "auto_accepted_under_policy");
+  assert.equal(decision.accountability.accountableSeatStatus, "missing");
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) =>
+        reason.id === "accountable_seat_missing" && reason.severity === "audit",
+    ),
+    true,
+  );
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) => reason.id === "accountable_seat_required",
+    ),
+    false,
+  );
+});
+
 test("model-backed external checks cannot grant auto acceptance", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "wutai-attention-model-check-"));
   const policyRoot = await mkdtemp(join(tmpdir(), "wutai-attention-model-policy-"));
@@ -263,6 +328,16 @@ test("model-backed external checks cannot grant auto acceptance", async () => {
   const { packetDir } = await latestPacket(outputRoot);
   const policyPath = await writeAttentionPolicy(policyRoot, {
     autoAcceptTrusted: true,
+    requireAccountableSeatForAutoAccept: true,
+    accountableSeats: [
+      {
+        id: "repo-maintainer",
+        role: "maintainer",
+        match: {
+          packetType: "local_script",
+        },
+      },
+    ],
     externalChecks: [
       {
         checkId: "ai_review_passed",
@@ -302,6 +377,16 @@ test("model-backed external checks require attention even for trusted packets", 
   const { packetDir, trustedProducersPath } = await createSignedPacket(outputRoot);
   const policyPath = await writeAttentionPolicy(policyRoot, {
     autoAcceptTrusted: true,
+    requireAccountableSeatForAutoAccept: true,
+    accountableSeats: [
+      {
+        id: "repo-maintainer",
+        role: "maintainer",
+        match: {
+          packetType: "local_script",
+        },
+      },
+    ],
     externalChecks: [
       {
         checkId: "ai_review_passed",
@@ -389,7 +474,7 @@ test("attention decision blocks trusted auto acceptance when policy requires a m
   assert.equal(decision.accountability.accountableSeatStatus, "missing");
   assert.equal(
     decision.attention.reasons.some(
-      (reason) => reason.id === "accountable_seat_missing",
+      (reason) => reason.id === "accountable_seat_required",
     ),
     true,
   );

@@ -13,7 +13,7 @@ const DEFAULT_ATTENTION_POLICY = {
   policyId: "wutai-default-attention-policy-v0.10",
   sourceLabel: "built-in default",
   autoAcceptTrusted: true,
-  requireAccountableSeatForAutoAccept: false,
+  requireAccountableSeatForAutoAccept: true,
   accountableSeats: [],
   externalChecks: [],
   reasonSeats: {
@@ -25,6 +25,7 @@ const DEFAULT_ATTENTION_POLICY = {
     reviewer_required: "maintainer",
     scoped_ratification_missing: "maintainer",
     accountable_seat_missing: "owner",
+    accountable_seat_required: "owner",
     packet_blocked: "owner",
     permission_basis_missing: "owner",
     model_backed_external_check: "maintainer",
@@ -513,11 +514,26 @@ function buildReasons({
     );
   }
 
-  if (policy.requireAccountableSeatForAutoAccept && !accountableSeat) {
+  if (!accountableSeat) {
     addReason(
       reasons,
       policy,
       "accountable_seat_missing",
+      "audit",
+      "No matching accountable seat is configured for this packet.",
+    );
+  }
+
+  if (
+    policy.requireAccountableSeatForAutoAccept &&
+    !accountableSeat &&
+    trustVerdict.verdict === "trusted" &&
+    policy.autoAcceptTrusted
+  ) {
+    addReason(
+      reasons,
+      policy,
+      "accountable_seat_required",
       "blocker",
       "Attention policy requires an accountable seat before auto acceptance.",
     );
@@ -559,14 +575,10 @@ function decisionFor({
   permissionBasis,
 }) {
   if (trustVerdict.verdict === "blocked") return "blocked_or_unowned";
-  if (
-    reasons.some((reason) =>
-      ["accountable_seat_missing", "permission_basis_missing"].includes(reason.id),
-    )
-  ) {
+  if (scopedRatification.accepted) return "scoped_ratified";
+  if (reasons.some((reason) => reason.severity === "blocker")) {
     return "blocked_or_unowned";
   }
-  if (scopedRatification.accepted) return "scoped_ratified";
   if (reasons.some((reason) => reason.severity === "review")) {
     return "human_attention_required";
   }

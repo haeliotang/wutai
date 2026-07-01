@@ -177,7 +177,9 @@ Implemented:
   ratification. The output also separates `permissionBasis` from
   `riskSignals`; only `mechanical_allowlist` and deterministic external checks
   are grant-eligible, while model-backed external checks, semantic comparisons,
-  and model judgments are review signals only.
+  and model judgments are review signals only. The built-in policy requires an
+  accountable seat for auto acceptance, and missing accountable-seat evidence
+  remains an audit reason even under a looser caller-supplied policy.
 - Example GitHub Actions consumer-attestation gate in
   `.github/workflows/wutai-consumer-attestation.example.yml`.
 - Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
