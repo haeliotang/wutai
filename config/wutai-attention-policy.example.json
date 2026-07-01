@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "wutai.attention_policy",
-  "policyId": "example-attention-policy-v0.9",
+  "policyId": "example-attention-policy-v0.10",
   "sourceLabel": "example",
   "autoAcceptTrusted": true,
   "requireAccountableSeatForAutoAccept": true,
@@ -16,6 +16,15 @@
       }
     }
   ],
+  "externalChecks": [
+    {
+      "checkId": "required_tests_passed",
+      "label": "Required test suite passed",
+      "status": "pass",
+      "determinism": "deterministic",
+      "source": "ci"
+    }
+  ],
   "reasonSeats": {
     "no_human_review": "maintainer",
     "trust_verdict_review_required": "maintainer",
@@ -25,6 +34,8 @@
     "reviewer_required": "maintainer",
     "scoped_ratification_missing": "maintainer",
     "accountable_seat_missing": "owner",
+    "permission_basis_missing": "owner",
+    "model_backed_external_check": "maintainer",
     "packet_blocked": "owner"
   }
 }

@@ -10,6 +10,8 @@
     "generatedAt",
     "decision",
     "packet",
+    "permissionBasis",
+    "riskSignals",
     "attention",
     "accountability",
     "policy",
@@ -45,6 +47,67 @@
         "trustVerdict": { "enum": ["trusted", "review_required", "blocked"] }
       },
       "additionalProperties": true
+    },
+    "permissionBasis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "basisId",
+          "label",
+          "evaluationMethod",
+          "grantEligible",
+          "source"
+        ],
+        "properties": {
+          "basisId": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "evaluationMethod": {
+            "enum": [
+              "mechanical_allowlist",
+              "deterministic_external_check"
+            ]
+          },
+          "grantEligible": { "const": true },
+          "source": { "type": "string", "minLength": 1 },
+          "determinism": { "enum": ["deterministic"] },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "riskSignals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "signalId",
+          "label",
+          "evaluationMethod",
+          "grantEligible",
+          "source",
+          "severity"
+        ],
+        "properties": {
+          "signalId": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "evaluationMethod": {
+            "enum": [
+              "mechanical_allowlist",
+              "deterministic_external_check",
+              "model_backed_external_check",
+              "semantic_comparison",
+              "model_judgment"
+            ]
+          },
+          "grantEligible": { "const": false },
+          "source": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["audit", "review", "blocker"] },
+          "determinism": { "enum": ["deterministic", "model_backed"] },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
     },
     "attention": {
       "type": "object",

@@ -232,6 +232,20 @@ test("attention decision auto accepts trusted packets under policy while recordi
   assert.equal(decision.decision, "auto_accepted_under_policy");
   assert.equal(decision.attention.required, false);
   assert.equal(
+    decision.permissionBasis.every((basis) => basis.grantEligible === true),
+    true,
+  );
+  assert.equal(
+    decision.permissionBasis.some(
+      (basis) => basis.evaluationMethod === "deterministic_external_check",
+    ),
+    true,
+  );
+  assert.equal(
+    decision.riskSignals.every((signal) => signal.grantEligible === false),
+    true,
+  );
+  assert.equal(
     decision.attention.reasons.some((reason) => reason.id === "no_human_review"),
     true,
   );
@@ -239,6 +253,84 @@ test("attention decision auto accepts trusted packets under policy while recordi
   assert.equal(
     (await readJson(join(packetDir, "attention-decision.json"))).decision,
     "auto_accepted_under_policy",
+  );
+});
+
+test("model-backed external checks cannot grant auto acceptance", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-attention-model-check-"));
+  const policyRoot = await mkdtemp(join(tmpdir(), "wutai-attention-model-policy-"));
+  runWrapper([], outputRoot);
+  const { packetDir } = await latestPacket(outputRoot);
+  const policyPath = await writeAttentionPolicy(policyRoot, {
+    autoAcceptTrusted: true,
+    externalChecks: [
+      {
+        checkId: "ai_review_passed",
+        label: "AI review passed",
+        status: "pass",
+        determinism: "model_backed",
+        source: "external-ai-reviewer",
+      },
+    ],
+  });
+
+  const { result, decision } = runAttention(packetDir, [
+    "--attention-policy",
+    policyPath,
+  ]);
+
+  assert.equal(result.status, 10);
+  assert.equal(decision.decision, "human_attention_required");
+  assert.equal(
+    decision.permissionBasis.some((basis) => basis.basisId === "ai_review_passed"),
+    false,
+  );
+  assert.equal(
+    decision.riskSignals.some(
+      (signal) =>
+        signal.signalId === "ai_review_passed" &&
+        signal.evaluationMethod === "model_backed_external_check" &&
+        signal.grantEligible === false,
+    ),
+    true,
+  );
+});
+
+test("model-backed external checks require attention even for trusted packets", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-attention-trusted-model-"));
+  const policyRoot = await mkdtemp(join(tmpdir(), "wutai-attention-trusted-policy-"));
+  const { packetDir, trustedProducersPath } = await createSignedPacket(outputRoot);
+  const policyPath = await writeAttentionPolicy(policyRoot, {
+    autoAcceptTrusted: true,
+    externalChecks: [
+      {
+        checkId: "ai_review_passed",
+        label: "AI review passed",
+        status: "pass",
+        determinism: "model_backed",
+        source: "external-ai-reviewer",
+      },
+    ],
+  });
+
+  const { result, decision } = runAttention(packetDir, [
+    "--trusted-producers",
+    trustedProducersPath,
+    "--attention-policy",
+    policyPath,
+  ]);
+
+  assert.equal(result.status, 10);
+  assert.equal(decision.decision, "human_attention_required");
+  assert.equal(
+    decision.permissionBasis.some((basis) => basis.grantEligible === true),
+    true,
+  );
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) => reason.id === "model_backed_external_check",
+    ),
+    true,
   );
 });
 

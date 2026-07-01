@@ -33,6 +33,26 @@
         "additionalProperties": true
       }
     },
+    "externalChecks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["checkId", "status", "determinism"],
+        "properties": {
+          "checkId": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "status": { "enum": ["pass", "fail", "not_recorded"] },
+          "determinism": { "enum": ["deterministic", "model_backed"] },
+          "source": { "type": "string" },
+          "version": { "type": "string" },
+          "configSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
     "reasonSeats": {
       "type": "object",
       "additionalProperties": { "type": "string" }

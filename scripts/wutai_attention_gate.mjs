@@ -10,11 +10,12 @@ const CONSUMER_ATTESTATION_CHECK_NAME = "consumer-attestation-check.json";
 const DEFAULT_ATTENTION_POLICY = {
   schemaVersion: 1,
   kind: "wutai.attention_policy",
-  policyId: "wutai-default-attention-policy-v0.9",
+  policyId: "wutai-default-attention-policy-v0.10",
   sourceLabel: "built-in default",
   autoAcceptTrusted: true,
   requireAccountableSeatForAutoAccept: false,
   accountableSeats: [],
+  externalChecks: [],
   reasonSeats: {
     no_human_review: "maintainer",
     trust_verdict_review_required: "maintainer",
@@ -25,6 +26,8 @@ const DEFAULT_ATTENTION_POLICY = {
     scoped_ratification_missing: "maintainer",
     accountable_seat_missing: "owner",
     packet_blocked: "owner",
+    permission_basis_missing: "owner",
+    model_backed_external_check: "maintainer",
   },
 };
 
@@ -34,7 +37,7 @@ function usage() {
   npm run wutai:attention -- [options] <packet-dir>
 
 Options:
-  --attention-policy <path>          Attention policy JSON. Default: built-in v0.9 policy.
+  --attention-policy <path>          Attention policy JSON. Default: built-in v0.10 policy.
   --consumer-attestation-check <path> Scoped ratification check JSON. Default: <packet-dir>/consumer-attestation-check.json when present.
   --trusted-producers <path>         Trusted producer policy JSON for packet verification.
   --trust-policy <path>              Trust verdict policy JSON for packet verification.
@@ -144,6 +147,9 @@ function normalizePolicy(raw, sourceLabel) {
     accountableSeats: Array.isArray(raw.accountableSeats)
       ? raw.accountableSeats.filter(isRecord)
       : [],
+    externalChecks: Array.isArray(raw.externalChecks)
+      ? raw.externalChecks.filter(isRecord)
+      : [],
     reasonSeats: {
       ...DEFAULT_ATTENTION_POLICY.reasonSeats,
       ...(isRecord(raw.reasonSeats) ? raw.reasonSeats : {}),
@@ -186,6 +192,173 @@ function packetFromVerification(artifacts, trustVerdict) {
 
 function checkStatus(trustVerdict, name) {
   return trustVerdict.checks?.find((check) => check.name === name)?.status;
+}
+
+function normalizeEvaluationMethod(value, fallback) {
+  if (
+    value === "mechanical_allowlist" ||
+    value === "deterministic_external_check" ||
+    value === "model_backed_external_check" ||
+    value === "semantic_comparison" ||
+    value === "model_judgment"
+  ) {
+    return value;
+  }
+  return fallback;
+}
+
+function grantEligibleForMethod(method) {
+  return (
+    method === "mechanical_allowlist" ||
+    method === "deterministic_external_check"
+  );
+}
+
+function basisEntry({
+  basisId,
+  label,
+  evaluationMethod,
+  source,
+  evidence,
+  determinism = undefined,
+}) {
+  const method = normalizeEvaluationMethod(evaluationMethod, "mechanical_allowlist");
+  const grantEligible = grantEligibleForMethod(method);
+  return {
+    basisId,
+    label,
+    evaluationMethod: method,
+    grantEligible,
+    source,
+    ...(determinism ? { determinism } : {}),
+    ...(evidence ? { evidence } : {}),
+  };
+}
+
+function signalEntry({
+  signalId,
+  label,
+  evaluationMethod,
+  source,
+  severity = "review",
+  evidence,
+  determinism = undefined,
+}) {
+  const method = normalizeEvaluationMethod(evaluationMethod, "model_judgment");
+  return {
+    signalId,
+    label,
+    evaluationMethod: method,
+    grantEligible: false,
+    source,
+    severity,
+    ...(determinism ? { determinism } : {}),
+    ...(evidence ? { evidence } : {}),
+  };
+}
+
+function externalCheckEntry(check, index) {
+  const checkId =
+    typeof check.checkId === "string" && check.checkId.trim()
+      ? check.checkId.trim()
+      : `external_check_${index + 1}`;
+  const label =
+    typeof check.label === "string" && check.label.trim()
+      ? check.label.trim()
+      : checkId;
+  const status = typeof check.status === "string" ? check.status : "not_recorded";
+  const determinism =
+    check.determinism === "deterministic" ? "deterministic" : "model_backed";
+  const method =
+    determinism === "deterministic"
+      ? "deterministic_external_check"
+      : "model_backed_external_check";
+  const payload = {
+    label,
+    evaluationMethod: method,
+    source: "attention_policy.externalChecks",
+    determinism,
+    evidence: `status=${status}`,
+  };
+  if (status === "pass" && determinism === "deterministic") {
+    return {
+      type: "basis",
+      value: basisEntry({
+        basisId: checkId,
+        ...payload,
+      }),
+    };
+  }
+  return {
+    type: "signal",
+    value: signalEntry({
+      signalId: checkId,
+      severity: status === "fail" ? "review" : "audit",
+      ...payload,
+    }),
+  };
+}
+
+function buildPermissionEvidence({ trustVerdict, policy, packet }) {
+  const permissionBasis = [];
+  const riskSignals = [];
+
+  if (trustVerdict.verdict === "trusted") {
+    permissionBasis.push(
+      basisEntry({
+        basisId: "packet_trust_verdict",
+        label: "Packet trust verdict is trusted.",
+        evaluationMethod: "mechanical_allowlist",
+        source: "wutai.verify-packet",
+        evidence: "verdict=trusted",
+      }),
+    );
+  } else {
+    riskSignals.push(
+      signalEntry({
+        signalId: "packet_trust_verdict_not_trusted",
+        label: "Packet trust verdict is not trusted.",
+        evaluationMethod: "mechanical_allowlist",
+        source: "wutai.verify-packet",
+        severity: trustVerdict.verdict === "blocked" ? "blocker" : "review",
+        evidence: `verdict=${trustVerdict.verdict}`,
+      }),
+    );
+  }
+
+  if (trustVerdict.inputs?.trustedProducer === true) {
+    permissionBasis.push(
+      basisEntry({
+        basisId: "trusted_producer",
+        label: "Producer key matched trusted-producer policy.",
+        evaluationMethod: "mechanical_allowlist",
+        source: "wutai.verify-packet",
+        evidence: `producer=${String(packet.producerAdapter ?? "missing")}`,
+      }),
+    );
+  } else {
+    riskSignals.push(
+      signalEntry({
+        signalId: "untrusted_producer",
+        label: "Producer is not trusted by the selected local producer policy.",
+        evaluationMethod: "mechanical_allowlist",
+        source: "wutai.verify-packet",
+        severity: "review",
+        evidence: `producer=${String(packet.producerAdapter ?? "missing")}`,
+      }),
+    );
+  }
+
+  for (const [index, check] of policy.externalChecks.entries()) {
+    const entry = externalCheckEntry(check, index);
+    if (entry.type === "basis") {
+      permissionBasis.push(entry.value);
+    } else {
+      riskSignals.push(entry.value);
+    }
+  }
+
+  return { permissionBasis, riskSignals };
 }
 
 function seatFor(policy, reasonId) {
@@ -254,7 +427,15 @@ function scopedRatificationFromCheck(check, packet) {
   };
 }
 
-function buildReasons({ trustVerdict, policy, packet, scopedRatification, accountableSeat }) {
+function buildReasons({
+  trustVerdict,
+  policy,
+  packet,
+  scopedRatification,
+  accountableSeat,
+  permissionBasis,
+  riskSignals,
+}) {
   const reasons = [];
 
   if (trustVerdict.verdict === "blocked") {
@@ -342,17 +523,58 @@ function buildReasons({ trustVerdict, policy, packet, scopedRatification, accoun
     );
   }
 
+  if (trustVerdict.verdict === "trusted" && permissionBasis.length === 0) {
+    addReason(
+      reasons,
+      policy,
+      "permission_basis_missing",
+      "blocker",
+      "Auto acceptance requires at least one grant-eligible mechanical or deterministic basis.",
+    );
+  }
+
+  if (
+    riskSignals.some(
+      (signal) => signal.evaluationMethod === "model_backed_external_check",
+    )
+  ) {
+    addReason(
+      reasons,
+      policy,
+      "model_backed_external_check",
+      "review",
+      "A model-backed external check is recorded as a risk signal, not a permission basis.",
+    );
+  }
+
   return reasons;
 }
 
-function decisionFor({ trustVerdict, policy, scopedRatification, reasons, accountableSeat }) {
+function decisionFor({
+  trustVerdict,
+  policy,
+  scopedRatification,
+  reasons,
+  accountableSeat,
+  permissionBasis,
+}) {
   if (trustVerdict.verdict === "blocked") return "blocked_or_unowned";
-  if (reasons.some((reason) => reason.id === "accountable_seat_missing")) {
+  if (
+    reasons.some((reason) =>
+      ["accountable_seat_missing", "permission_basis_missing"].includes(reason.id),
+    )
+  ) {
     return "blocked_or_unowned";
   }
   if (scopedRatification.accepted) return "scoped_ratified";
+  if (reasons.some((reason) => reason.severity === "review")) {
+    return "human_attention_required";
+  }
   if (trustVerdict.verdict === "trusted" && policy.autoAcceptTrusted) {
-    if (!policy.requireAccountableSeatForAutoAccept || accountableSeat) {
+    if (
+      permissionBasis.length > 0 &&
+      (!policy.requireAccountableSeatForAutoAccept || accountableSeat)
+    ) {
       return "auto_accepted_under_policy";
     }
   }
@@ -404,12 +626,19 @@ export async function runAttentionDecisionGate(packetDir, options = {}) {
   const check = rawCheck ? { ...rawCheck, __path: basename(checkPath) } : null;
   const scopedRatification = scopedRatificationFromCheck(check, packet);
   const accountableSeat = findAccountableSeat(attentionPolicy, packet);
+  const { permissionBasis, riskSignals } = buildPermissionEvidence({
+    trustVerdict,
+    policy: attentionPolicy,
+    packet,
+  });
   const reasons = buildReasons({
     trustVerdict,
     policy: attentionPolicy,
     packet,
     scopedRatification,
     accountableSeat,
+    permissionBasis,
+    riskSignals,
   });
   const decision = decisionFor({
     trustVerdict,
@@ -417,6 +646,7 @@ export async function runAttentionDecisionGate(packetDir, options = {}) {
     scopedRatification,
     reasons,
     accountableSeat,
+    permissionBasis,
   });
   const artifact = {
     schemaVersion: 1,
@@ -426,6 +656,8 @@ export async function runAttentionDecisionGate(packetDir, options = {}) {
     decision,
     summary: summaryFor(decision, reasons),
     packet,
+    permissionBasis,
+    riskSignals,
     attention: {
       required: decision === "human_attention_required",
       reasons,
@@ -444,6 +676,7 @@ export async function runAttentionDecisionGate(packetDir, options = {}) {
       autoAcceptTrusted: attentionPolicy.autoAcceptTrusted,
       requireAccountableSeatForAutoAccept:
         attentionPolicy.requireAccountableSeatForAutoAccept,
+      externalCheckCount: attentionPolicy.externalChecks.length,
     },
     inputs: {
       trustVerdict: trustVerdict.verdict,
