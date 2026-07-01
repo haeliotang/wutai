@@ -11,7 +11,7 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.8 review-session instrumentation. The current code
+> Repository status: v0.9 attention and accountability gate. The current code
 > implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
@@ -26,6 +26,10 @@ auditable, stoppable, and reviewable.
 > for acceptance, and marks unscoped ratification as a theater anti-signal.
 > v0.8 adds an optional `review-session.json` scorer so the harness can
 > distinguish attention credit from packet-caused scoped ratification credit.
+> v0.9 adds an attention-decision gate that routes verified packets into
+> `auto_accepted_under_policy`, `human_attention_required`,
+> `scoped_ratified`, or `blocked_or_unowned` while explicitly recording when
+> no scoped human review evidence is present.
 > It does not prove reviewer identity, trace completeness, or external demand.
 
 ## Why This Exists
@@ -60,7 +64,12 @@ scoped ratification harness for testing whether a second, non-self reviewer
 will sign a declared boundary or refuse because of intent drift, an empty
 accountability seat, or unevidenced claims. v0.8 adds review-session
 instrumentation for the preceding question: would the reviewer have looked at
-all, and did the packet causally change the scoped decision?
+all, and did the packet causally change the scoped decision? v0.9 adds an
+attention-decision gate for the likely operating reality where most agent work
+will not receive careful human review: trusted packets may be auto-accepted
+under policy, review-required packets route to a required human seat, scoped
+ratification remains a first-class acceptance path, and blocked or unowned work
+is explicit.
 
 ```text
 natural-language task
@@ -153,6 +162,14 @@ Implemented:
   controls. The output adds `attentionOutcome`, `causalCredit`, and
   `reviewSession` so an attention win cannot be counted as packet-caused
   scoped ratification.
+- Attention Decision Gate v0.9. `wutai attention-decision` /
+  `npm run wutai:attention -- <packet-dir>` re-runs packet verification, reads
+  optional `consumer-attestation-check.json`, applies a local
+  `wutai.attention_policy`, and emits `attention-decision.json` with
+  `auto_accepted_under_policy`, `human_attention_required`,
+  `scoped_ratified`, or `blocked_or_unowned`. It records `no_human_review` as
+  an audit signal when policy permits auto acceptance without scoped human
+  ratification.
 - Example GitHub Actions consumer-attestation gate in
   `.github/workflows/wutai-consumer-attestation.example.yml`.
 - Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
@@ -270,6 +287,13 @@ A v0.8 review-session run may also supply:
 review-session.json
 ```
 
+If a packet is processed by the v0.9 attention-decision gate, Wutai may also
+write:
+
+```text
+attention-decision.json
+```
+
 Not implemented:
 
 - Runtime-enforced supervised sessions for arbitrary external agents.
@@ -280,11 +304,13 @@ Not implemented:
   the v0.5 packet proof harness.
 - Cryptographic consumer-reviewer identity proof or automatic GitHub PR
   reviewer extraction.
+- Proof that a maintainer silently looked at a PR without leaving review
+  artifacts.
 - Path-level witnessing of external runtimes; current external packet paths
   record declared traces supplied by producers.
-- Proof that non-author users already want to perform scoped ratification; v0.8
-  only provides the harness needed to test attention, causal credit, and scoped
-  ratification behavior.
+- Proof that non-author users already want to perform scoped ratification; v0.9
+  provides gates for attention routing and policy-backed auto acceptance, not
+  external demand proof.
 - Cross-agent credential broker.
 - Mobile approval companion.
 - Production packaging.
@@ -309,6 +335,7 @@ behavior.
 Key design documents:
 
 - [Development Guide](docs/development.md)
+- [Attention Decision Gate](docs/attention-decision-gate.md)
 - [Scoped Ratification Gate](docs/consumer-attestation-gate.md)
 - [Scoped Ratification Prereg](docs/ratification-prereg.md)
 - [Agent Packet Inbox](docs/agent-packet-inbox.md)
@@ -536,6 +563,49 @@ To persist the verifier's derived artifacts beside the packet:
 ```bash
 npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
 ```
+
+## Attention Decision Gate
+
+v0.9 adds a policy-backed attention router for the case where most agent work
+will not receive careful human review. It consumes the packet verifier result
+and optional `consumer-attestation-check.json`, then emits one decision:
+
+```text
+auto_accepted_under_policy
+human_attention_required
+scoped_ratified
+blocked_or_unowned
+```
+
+Run with the built-in attention policy:
+
+```bash
+npm run wutai:attention -- ./artifacts/cli/<session_id>
+```
+
+Use an explicit policy and trusted producer policy:
+
+```bash
+npm run wutai:attention -- \
+  --attention-policy config/wutai-attention-policy.example.json \
+  --trusted-producers ./trusted-producers.json \
+  ./artifacts/cli/<session_id>
+```
+
+Write the derived artifacts beside the packet:
+
+```bash
+npm run wutai:attention -- \
+  --write-artifacts \
+  --attention-policy config/wutai-attention-policy.example.json \
+  ./artifacts/cli/<session_id>
+```
+
+The output records whether attention is required, which seat should be pulled
+in, whether a scoped ratification check was accepted, and whether the packet
+was auto-accepted despite no scoped human review evidence. This is attention
+routing over declared packet artifacts. It does not prove silent maintainer
+review, reviewer identity, trace completeness, or runtime sandboxing.
 
 ## Scoped Ratification Gate
 

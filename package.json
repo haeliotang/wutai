@@ -17,10 +17,11 @@
     "wutai:run": "node scripts/wutai_run.mjs",
     "wutai:verify": "node scripts/wutai_verify_packet.mjs",
     "wutai:attest": "node scripts/wutai_attestation_gate.mjs",
+    "wutai:attention": "node scripts/wutai_attention_gate.mjs",
     "example:external-agent": "node examples/external-agent-wrapper.mjs",
     "example:adapter-proof": "node examples/adapter-proof-runner.mjs",
     "test:evidence": ".venv/bin/python -m unittest discover -s tests/python -v",
-    "test:wutai-run": "node --test tests/node/wutai_run.test.mjs tests/node/wutai_verify_packet.test.mjs tests/node/wutai_agent_sdk.test.mjs tests/node/wutai_adapter_proof.test.mjs tests/node/wutai_consumer_attestation_gate.test.mjs",
+    "test:wutai-run": "node --test tests/node/wutai_run.test.mjs tests/node/wutai_verify_packet.test.mjs tests/node/wutai_agent_sdk.test.mjs tests/node/wutai_adapter_proof.test.mjs tests/node/wutai_consumer_attestation_gate.test.mjs tests/node/wutai_attention_gate.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:providers": "VITE_WUTAI_RESEARCH_ADAPTER=gpt-researcher playwright test tests/e2e/provider-profiles.spec.ts",
     "tauri": "tauri"

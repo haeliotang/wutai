@@ -6,7 +6,7 @@
 
 Wutai 是 agentic work 跨越信任边界时的本地信任与证据层。它不试图成为替用户完成所有任务的 agent 应用，而是记录 agent 在本机上下文中声明做了什么、被允许访问什么、产生了什么成果物，以及哪些结论需要证据复核或人工限定范围签收。
 
-当前仓库实现一个受监督的研究任务链路、一个 local-script trace-import 楔子、一个开发期 CLI wrapper、External Agent Integration Contract、Agent Packet Inbox，以及 v0.8 scoped ratification / review-session instrumentation harness，用它们证明以下本地信任层闭环：
+当前仓库实现一个受监督的研究任务链路、一个 local-script trace-import 楔子、一个开发期 CLI wrapper、External Agent Integration Contract、Agent Packet Inbox，以及 v0.9 attention / accountability gate，用它们证明以下本地信任层闭环：
 
 ```text
 自然语言任务
@@ -18,7 +18,7 @@ Wutai 是 agentic work 跨越信任边界时的本地信任与证据层。它不
   -> 本地任务历史
 ```
 
-当前未实现任意外部 agent 的运行期强制监督、shell command 沙箱或完整 permission broker、MCP proxy、浏览器控制、Codex/Claude Code live 适配、完整 computer-use、跨 agent credential broker、移动端确认器、consumer reviewer 的密码学身份认证、自动 GitHub PR reviewer 提取、静默 PR 查看检测、路径级见证、trace 完整性证明、真实非作者采用证明和生产打包。
+当前未实现任意外部 agent 的运行期强制监督、shell command 沙箱或完整 permission broker、MCP proxy、浏览器控制、Codex/Claude Code live 适配、完整 computer-use、跨 agent credential broker、移动端确认器、consumer reviewer 的密码学身份认证、自动 GitHub PR reviewer 提取、静默 PR 查看检测、自动 CODEOWNERS owner 提取、路径级见证、trace 完整性证明、真实非作者采用证明和生产打包。
 
 ## 2. 开发原则
 
@@ -67,6 +67,7 @@ scripts/
   wutai_run.mjs                   开发期 CLI wrapper，执行命令并生成 work packet
   wutai_verify_packet.mjs         packet verifier 和 trust verdict CLI
   wutai_attestation_gate.mjs      scoped ratification harness，复核 packet 后拆分 attention/wedge/moat outcome
+  wutai_attention_gate.mjs        attention decision gate，把 verified packet 路由到 auto/human/scoped/block 四态
   gpt_researcher_adapter.py       Python GPT Researcher sidecar
   evidence_gate.py                claim ledger 和 deterministic evidence rules
 
@@ -81,6 +82,8 @@ config/
   wutai-adapter-registry.json     adapter registry and proof boundaries
   wutai-trust-policy-profiles.json
                                   verifier trust-policy profiles
+  wutai-attention-policy.example.json
+                                  v0.9 attention policy example
 
 tests/
   e2e/                            Playwright UI / contract 测试
@@ -89,10 +92,13 @@ tests/
                                   v0.5 adapter proof runner 回归
   node/wutai_consumer_attestation_gate.test.mjs
                                   v0.8 scoped ratification and review-session 回归
+  node/wutai_attention_gate.test.mjs
+                                  v0.9 attention decision gate 回归
   python/test_evidence_gate.py    Evidence Gate 离线回归
 
 docs/
   architecture.md                 架构分层
+  attention-decision-gate.md      v0.9 attention and accountability gate
   consumer-attestation-gate.md    v0.8 scoped ratification and review-session gate
   ratification-prereg.md          v0.8 scoped ratification prereg
   agent-packet-inbox.md           v0.5 Agent Packet Inbox
@@ -461,8 +467,9 @@ Wutai 默认不应把权限永久化。权限应按 task/session scope 记录，
 - Adapter registry 定义 native/proof-harness/external-contract/planned adapter 边界；v0.5 proof harness 覆盖 `codexCli`、`claudeCode`、`githubActions` producer id，但不声称官方 live 集成或运行时监督。
 - Packet retention review 会写入 `retention.json`，记录 `retained` / `rejected` 本地决策；该决策不删除外部文件、不改变外部 runtime，也不证明 packet 安全。
 - Scoped Ratification Gate 会读取 `consumer-attestation.json`，重新运行 packet verifier，要求非 self reviewer、当前 `manifest.json` hash 绑定、packet identity 绑定，并可写入 `consumer-attestation-check.json`；v0.7 会拆分 `wedgeOutcome` 和 `moatOutcome`，只有带 `declaredScope` / `excludedScope` 的 `scoped_ratified` 才是 acceptance pass，带 scope/evidence/empty-seat 理由的 refusal 是有效 MOAT 读数但不是 pass，无范围 ratification 是 theater anti-signal。v0.8 可选读取 `review-session.json`，记录 Arm 0 would-look baseline、Arm A diff-only baseline、Arm B packet-assisted review 和 contamination controls，并输出 `attentionOutcome`、`causalCredit` 和 `reviewSession`，防止 attention win 或 diff-only 已知问题被误算成 packet-caused scoped ratification。该 gate 不证明 reviewer 的真实身份、不自动读取 GitHub PR review metadata、不检测静默查看、不证明 trace 完整性、不证明已有非作者采用。
+- Attention Decision Gate 会读取 packet directory，重新运行 packet verifier，可选读取 `consumer-attestation-check.json` 和 `wutai.attention_policy`，输出 `attention-decision.json`；v0.9 会把 packet 路由到 `auto_accepted_under_policy`、`human_attention_required`、`scoped_ratified`、`blocked_or_unowned`，并在没有 accepted scoped ratification 时显式记录 `no_human_review` audit signal。该 gate 不证明静默 human review、不证明 reviewer identity、不自动读取 GitHub PR metadata 或 CODEOWNERS、不证明 trace 完整性、不提供 runtime sandbox。
 
-下一目标：用 `docs/ratification-prereg.md` 约束一次真实的非作者 scoped-ratification session。代码层只能继续推进验证仪器：更真实的 session fixture、自动渲染最小字段、或标准 provenance 输出；不要把 v0.8 的 harness 叙述成已验证产品。
+下一目标：用真实 agent PR / packet 跑一次 attention-decision dry run，验证 `auto_accepted_under_policy`、`human_attention_required`、`blocked_or_unowned` 是否能解释实际 review load。代码层只能继续推进验证仪器：owner extraction fixture、GitHub check 输出、或标准 provenance 输出；不要把 v0.9 的 gate 叙述成已验证产品。
 
 验收标准：
 

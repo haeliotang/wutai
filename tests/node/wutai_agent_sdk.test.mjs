@@ -159,6 +159,8 @@ test("contract schemas and trust-policy profiles are valid JSON", async () => {
   );
   assert.deepEqual(schemaFiles.sort(), [
     "adapter-registry.schema.json",
+    "attention-decision.schema.json",
+    "attention-policy.schema.json",
     "cli-policy-preflight.schema.json",
     "consumer-attestation-check.schema.json",
     "consumer-attestation.schema.json",

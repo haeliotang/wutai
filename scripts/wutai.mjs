@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { runAttentionDecisionGateCli } from "./wutai_attention_gate.mjs";
 import { runConsumerAttestationGateCli } from "./wutai_attestation_gate.mjs";
 import { runVerifyPacketCli } from "./wutai_verify_packet.mjs";
 
@@ -12,9 +13,10 @@ function usage() {
   return `Usage:
   wutai verify-packet [options] <packet-dir>
   wutai attest-packet [options] <packet-dir>
+  wutai attention-decision [options] <packet-dir>
   wutai run [options] -- <command> [args...]
 
-Use "wutai verify-packet --help", "wutai attest-packet --help", or "wutai run --help" for command-specific options.`;
+Use "wutai verify-packet --help", "wutai attest-packet --help", "wutai attention-decision --help", or "wutai run --help" for command-specific options.`;
 }
 
 function runNodeScript(scriptName, args) {
@@ -38,6 +40,9 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (command === "attest-packet") {
     return runConsumerAttestationGateCli(args);
+  }
+  if (command === "attention-decision") {
+    return runAttentionDecisionGateCli(args);
   }
   if (command === "run") {
     return runNodeScript("wutai_run.mjs", args);

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/attention-policy.schema.json",
+  "title": "Wutai Attention Policy",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "policyId"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.attention_policy" },
+    "policyId": { "type": "string", "minLength": 1 },
+    "sourceLabel": { "type": "string" },
+    "autoAcceptTrusted": { "type": "boolean" },
+    "requireAccountableSeatForAutoAccept": { "type": "boolean" },
+    "accountableSeats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "role"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "role": { "type": "string", "minLength": 1 },
+          "source": { "type": "string" },
+          "reason": { "type": "string" },
+          "match": {
+            "type": "object",
+            "properties": {
+              "packetType": { "type": "string" },
+              "producerAdapter": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "reasonSeats": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

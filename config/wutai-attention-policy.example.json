@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.attention_policy",
+  "policyId": "example-attention-policy-v0.9",
+  "sourceLabel": "example",
+  "autoAcceptTrusted": true,
+  "requireAccountableSeatForAutoAccept": true,
+  "accountableSeats": [
+    {
+      "id": "repo-maintainer",
+      "role": "maintainer",
+      "source": "repo-policy",
+      "reason": "Default accountable seat for local-script packets.",
+      "match": {
+        "packetType": "local_script"
+      }
+    }
+  ],
+  "reasonSeats": {
+    "no_human_review": "maintainer",
+    "trust_verdict_review_required": "maintainer",
+    "untrusted_producer": "maintainer",
+    "policy_warning": "maintainer",
+    "high_risk_allow": "security_reviewer",
+    "reviewer_required": "maintainer",
+    "scoped_ratification_missing": "maintainer",
+    "accountable_seat_missing": "owner",
+    "packet_blocked": "owner"
+  }
+}
