@@ -152,7 +152,7 @@ test("external-agent wrapper runs a real command and emits a Wutai packet verdic
   assert.match(trace.stdoutSummary, /external wrapper/);
 });
 
-test("v0.7 contract schemas and trust-policy profiles are valid JSON", async () => {
+test("contract schemas and trust-policy profiles are valid JSON", async () => {
   const schemasDir = join(repoRoot, "schemas");
   const schemaFiles = (await readdir(schemasDir)).filter((name) =>
     name.endsWith(".schema.json"),
@@ -164,6 +164,7 @@ test("v0.7 contract schemas and trust-policy profiles are valid JSON", async () 
     "consumer-attestation.schema.json",
     "local-script-trace.schema.json",
     "packet-retention-decision.schema.json",
+    "review-session.schema.json",
     "session-audit.schema.json",
     "session-ledger.schema.json",
     "trust-policy.schema.json",

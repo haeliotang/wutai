@@ -7,6 +7,7 @@ import { verifyPacketDirectory } from "./wutai_verify_packet.mjs";
 
 const CONSUMER_ATTESTATION_NAME = "consumer-attestation.json";
 const CONSUMER_ATTESTATION_CHECK_NAME = "consumer-attestation-check.json";
+const REVIEW_SESSION_NAME = "review-session.json";
 const VALID_DECISIONS = new Set([
   "ratified",
   "refused",
@@ -30,6 +31,7 @@ function usage() {
 
 Options:
   --attestation <path>         Scoped ratification JSON. Default: <packet-dir>/consumer-attestation.json.
+  --review-session <path>      Optional v0.8 review-session JSON for attention/causal-credit scoring.
   --disallow-reviewer <id>     Reviewer id that cannot satisfy the gate. Repeatable.
   --trusted-producers <path>   Trusted producer policy JSON for packet verification.
   --trust-policy <path>        Trust verdict policy JSON for packet verification.
@@ -44,6 +46,7 @@ Exit codes:
 function parseArgs(argv) {
   const options = {
     attestation: null,
+    reviewSession: null,
     disallowedReviewers: [],
     trustedProducers: null,
     trustPolicy: null,
@@ -61,6 +64,10 @@ function parseArgs(argv) {
       index += 1;
       if (!argv[index]) throw new Error("--attestation requires a value.");
       options.attestation = argv[index];
+    } else if (arg === "--review-session") {
+      index += 1;
+      if (!argv[index]) throw new Error("--review-session requires a value.");
+      options.reviewSession = argv[index];
     } else if (arg === "--disallow-reviewer") {
       index += 1;
       if (!argv[index]) throw new Error("--disallow-reviewer requires a value.");
@@ -154,6 +161,18 @@ function wedgeOutcome(attestation) {
   return "not_recorded";
 }
 
+function normalizeMoatOutcome(value) {
+  if (
+    value === "scoped_ratified" ||
+    value === "refused_with_scope_reason" ||
+    value === "theater_signature" ||
+    value === "no_action"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function moatOutcome(attestation) {
   const decision = typeof attestation.decision === "string" ? attestation.decision : "";
   const scopeReasons = normalizedScopeReasons(attestation);
@@ -208,23 +227,224 @@ function addCheck(checks, status, name, message, evidence = undefined) {
   });
 }
 
+function addSessionNote(notes, status, name, message, evidence = undefined) {
+  notes.push({
+    name,
+    status,
+    message,
+    ...(evidence ? { evidence } : {}),
+  });
+}
+
 function decisionStatus(checks) {
   return checks.some((check) => check.status === "failed") ? "failed" : "passed";
 }
 
-function summaryFor({ status, gate, wedge, moat }) {
+function summaryFor({ status, gate, wedge, moat, attention, causalCredit }) {
   if (gate === "accepted") {
-    return `Scoped ratification gate passed: ${moat} with ${wedge}.`;
+    return `Scoped ratification gate passed: ${moat} with ${wedge}; attention=${attention}; causalCredit=${causalCredit}.`;
   }
   if (moat === "refused_with_scope_reason") {
-    return `Reviewer refused scoped ratification with a scope/evidence/empty-seat reason. This is a valid MOAT readout, but it is not an acceptance pass.`;
+    return `Reviewer refused scoped ratification with a scope/evidence/empty-seat reason. This is a valid MOAT readout, but it is not an acceptance pass. attention=${attention}; causalCredit=${causalCredit}.`;
   }
   if (moat === "theater_signature") {
-    return "Reviewer ratified without a declared scope and excluded scope. This is a THEATER anti-signal, not a pass.";
+    return `Reviewer ratified without a declared scope and excluded scope. This is a THEATER anti-signal, not a pass. attention=${attention}; causalCredit=${causalCredit}.`;
   }
   return status === "failed"
-    ? `Scoped ratification gate failed before a valid moat readout: ${moat}.`
-    : `Scoped ratification gate produced ${moat} with ${wedge}.`;
+    ? `Scoped ratification gate failed before a valid moat readout: ${moat}. attention=${attention}; causalCredit=${causalCredit}.`
+    : `Scoped ratification gate produced ${moat} with ${wedge}. attention=${attention}; causalCredit=${causalCredit}.`;
+}
+
+function boolOrNull(value) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function sessionArm(session, name) {
+  return isRecord(session?.[name]) ? session[name] : {};
+}
+
+function reviewSessionSubjectMatches(session, manifest, manifestSha256) {
+  const subject = isRecord(session.subject) ? session.subject : {};
+  return (
+    subject.manifestSha256 === manifestSha256 &&
+    subject.packetId === manifest.packetId &&
+    subject.taskId === manifest.taskId &&
+    subject.producerAdapter === manifest.producer?.adapter
+  );
+}
+
+function reviewSessionReviewerMatches(session, reviewerId) {
+  const sessionReviewer = isRecord(session.reviewer) ? session.reviewer : {};
+  const sessionReviewerId = normalizeReviewerId(sessionReviewer.id);
+  return sessionReviewerId && sessionReviewerId === reviewerId;
+}
+
+function reviewSessionPathLabel(path) {
+  return path ? basename(path) : REVIEW_SESSION_NAME;
+}
+
+function evaluateReviewSession({ reviewSession, reviewSessionPath, manifest, manifestSha256, reviewerId, moat }) {
+  if (!reviewSession) {
+    return {
+      status: "not_recorded",
+      attentionOutcome: "not_recorded",
+      causalCredit: "not_recorded",
+      path: null,
+      inputs: {},
+      contaminationReasons: [],
+      noCreditReasons: [],
+      notes: [
+        {
+          name: "review_session",
+          status: "not_recorded",
+          message: "No review-session JSON was supplied.",
+        },
+      ],
+    };
+  }
+
+  const arm0 = sessionArm(reviewSession, "arm0");
+  const armA = sessionArm(reviewSession, "armA");
+  const armB = sessionArm(reviewSession, "armB");
+  const controls = sessionArm(reviewSession, "controls");
+  const notes = [];
+  const contaminationReasons = [];
+  const noCreditReasons = [];
+  const wouldLook = boolOrNull(arm0.wouldLook);
+  const packetViewed = boolOrNull(armB.packetViewed);
+  const diffOnlySawTargetGap = boolOrNull(armA.sawTargetGap);
+  const diffOnlyScopedDecision = normalizeMoatOutcome(armA.scopedDecision);
+  const negativeControlReportedUseful = boolOrNull(controls.negativeControlReportedUseful);
+  const shamFieldAttributed = boolOrNull(controls.shamFieldAttributed);
+  const packetOnlyRepeatedDiff = boolOrNull(controls.packetOnlyRepeatedDiff);
+  const traceCompleteEnough = boolOrNull(controls.traceCompleteEnough);
+  const automaticReproducible = boolOrNull(controls.automaticReproducible);
+  const attentionOutcome =
+    wouldLook === false && packetViewed === true
+      ? "attention_win"
+      : wouldLook === null || packetViewed === null
+        ? "not_recorded"
+        : "attention_null";
+
+  addSessionNote(
+    notes,
+    reviewSession.kind === "wutai.review_session" ? "passed" : "failed",
+    "review_session_kind",
+    reviewSession.kind === "wutai.review_session"
+      ? "Review session kind matches the v0.8 contract."
+      : `Review session kind mismatch: ${String(reviewSession.kind ?? "missing")}.`,
+  );
+  if (reviewSession.kind !== "wutai.review_session") {
+    contaminationReasons.push("review_session_kind_mismatch");
+  }
+
+  addSessionNote(
+    notes,
+    reviewSessionSubjectMatches(reviewSession, manifest, manifestSha256) ? "passed" : "failed",
+    "review_session_subject",
+    "Review session subject must bind the same packet identity and manifest hash.",
+  );
+  if (!reviewSessionSubjectMatches(reviewSession, manifest, manifestSha256)) {
+    contaminationReasons.push("review_session_subject_mismatch");
+  }
+
+  addSessionNote(
+    notes,
+    reviewSessionReviewerMatches(reviewSession, reviewerId) ? "passed" : "failed",
+    "review_session_reviewer",
+    "Review session reviewer must match consumer-attestation reviewer.id.",
+    reviewerId ? `reviewer=${reviewerId}` : "reviewer=missing",
+  );
+  if (!reviewSessionReviewerMatches(reviewSession, reviewerId)) {
+    contaminationReasons.push("review_session_reviewer_mismatch");
+  }
+
+  if (packetViewed !== true) noCreditReasons.push("packet_not_viewed");
+  if (diffOnlyScopedDecision === null) {
+    noCreditReasons.push("diff_only_scoped_decision_not_recorded");
+  }
+  if (diffOnlyScopedDecision && diffOnlyScopedDecision === moat) {
+    noCreditReasons.push("diff_only_same_scoped_decision");
+  }
+  if (diffOnlySawTargetGap === true) noCreditReasons.push("diff_only_already_saw_target_gap");
+  if (packetOnlyRepeatedDiff === true) noCreditReasons.push("packet_only_repeated_diff");
+  if (wouldLook === null) noCreditReasons.push("would_look_baseline_not_recorded");
+
+  if (negativeControlReportedUseful === true) {
+    contaminationReasons.push("negative_control_reported_useful");
+  }
+  if (shamFieldAttributed === true) {
+    contaminationReasons.push("sham_field_attributed");
+  }
+  if (traceCompleteEnough === false) {
+    contaminationReasons.push("trace_incomplete_for_scope_or_evidence_claims");
+  }
+  if (automaticReproducible === false) {
+    contaminationReasons.push("packet_fields_not_automatically_reproducible");
+  }
+
+  const packetChangedMoat =
+    attentionOutcome !== "attention_win" &&
+    wouldLook === true &&
+    packetViewed === true &&
+    moatSignal(moat) === "moat_win" &&
+    diffOnlyScopedDecision !== null &&
+    diffOnlyScopedDecision !== moat &&
+    diffOnlySawTargetGap === false &&
+    packetOnlyRepeatedDiff !== true;
+
+  const causalCredit = contaminationReasons.length
+    ? "contaminated"
+    : attentionOutcome === "attention_win"
+      ? "packet_changed_attention"
+      : packetChangedMoat
+        ? "packet_changed_moat"
+        : "no_causal_credit";
+
+  addSessionNote(
+    notes,
+    attentionOutcome === "not_recorded" ? "not_recorded" : "passed",
+    "attention_baseline",
+    `Attention outcome: ${attentionOutcome}.`,
+    `wouldLook=${String(wouldLook)} packetViewed=${String(packetViewed)}`,
+  );
+  addSessionNote(
+    notes,
+    causalCredit === "packet_changed_moat" || causalCredit === "packet_changed_attention"
+      ? "passed"
+      : causalCredit === "contaminated"
+        ? "failed"
+        : "not_recorded",
+    "causal_credit",
+    `Causal credit: ${causalCredit}.`,
+    [
+      `diffOnlyScopedDecision=${String(diffOnlyScopedDecision ?? "missing")}`,
+      `diffOnlySawTargetGap=${String(diffOnlySawTargetGap)}`,
+      `contaminationReasons=${contaminationReasons.length ? contaminationReasons.join(",") : "none"}`,
+      `noCreditReasons=${noCreditReasons.length ? noCreditReasons.join(",") : "none"}`,
+    ].join(" "),
+  );
+
+  return {
+    status: contaminationReasons.length ? "contaminated" : "usable",
+    attentionOutcome,
+    causalCredit,
+    path: reviewSessionPath ? reviewSessionPathLabel(reviewSessionPath) : null,
+    inputs: {
+      wouldLook,
+      packetViewed,
+      diffOnlyScopedDecision,
+      diffOnlySawTargetGap,
+      negativeControlReportedUseful,
+      shamFieldAttributed,
+      packetOnlyRepeatedDiff,
+      traceCompleteEnough,
+      automaticReproducible,
+    },
+    contaminationReasons,
+    noCreditReasons,
+    notes,
+  };
 }
 
 export async function runConsumerAttestationGate(packetDir, options = {}) {
@@ -239,6 +459,15 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
   );
   const attestationContent = await readFile(attestationPath, "utf8");
   const attestation = parseJson(attestationContent, basename(attestationPath));
+  const reviewSessionPath = options.reviewSession
+    ? resolve(options.reviewSession)
+    : null;
+  const reviewSession = reviewSessionPath
+    ? parseJson(
+        await readFile(reviewSessionPath, "utf8"),
+        basename(reviewSessionPath),
+      )
+    : null;
   const { trustVerdict } = await verifyPacketDirectory(resolvedPacketDir, {
     trustedProducers: options.trustedProducers,
     trustPolicy: options.trustPolicy,
@@ -253,6 +482,14 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
   const scopeReasons = normalizedScopeReasons(attestation);
   const wedge = wedgeOutcome(attestation);
   const moat = moatOutcome(attestation);
+  const reviewSessionResult = evaluateReviewSession({
+    reviewSession,
+    reviewSessionPath,
+    manifest,
+    manifestSha256,
+    reviewerId,
+    moat,
+  });
   const disallowedReviewers = (options.disallowedReviewers ?? [])
     .flatMap((item) => String(item).split(","))
     .map(normalizeReviewerId)
@@ -360,17 +597,26 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
   const status = decision === "accepted" ? "passed" : "failed";
   const cell = experimentCell(wedge, moat);
   const artifact = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: "wutai.consumer_attestation_check",
     taskId: manifest.taskId,
     generatedAt,
     status,
     gateDecision: decision,
+    attentionOutcome: reviewSessionResult.attentionOutcome,
+    causalCredit: reviewSessionResult.causalCredit,
     wedgeOutcome: wedge,
     moatOutcome: moat,
     moatSignal: moatSignal(moat),
     experimentCell: cell,
-    summary: summaryFor({ status, gate: decision, wedge, moat }),
+    summary: summaryFor({
+      status,
+      gate: decision,
+      wedge,
+      moat,
+      attention: reviewSessionResult.attentionOutcome,
+      causalCredit: reviewSessionResult.causalCredit,
+    }),
     packet: {
       packetId: manifest.packetId,
       packetType: manifest.packetType,
@@ -391,6 +637,7 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
       scopeReasons,
       wedgeSignals: normalizedWedgeSignals(attestation),
     },
+    reviewSession: reviewSessionResult,
     policy: {
       requiredDecision: "scoped_ratified",
       disallowedReviewers,
@@ -407,7 +654,7 @@ export async function runConsumerAttestationGate(packetDir, options = {}) {
         : [],
     checks,
     limitation:
-      "This harness records scoped ratification over a declared packet trace. It does not prove reviewer identity, trace completeness, sandbox execution, or make the packet safe.",
+      "This harness records scoped ratification over a declared packet trace. Review-session scoring can separate attention, wedge, and moat signals, but it does not prove reviewer identity, trace completeness, sandbox execution, or make the packet safe.",
   };
 
   if (options.writeArtifacts) {

@@ -10,6 +10,8 @@
     "generatedAt",
     "status",
     "gateDecision",
+    "attentionOutcome",
+    "causalCredit",
     "wedgeOutcome",
     "moatOutcome",
     "moatSignal",
@@ -17,6 +19,7 @@
     "packet",
     "reviewer",
     "ratification",
+    "reviewSession",
     "policy",
     "checks",
     "limitation"
@@ -28,6 +31,18 @@
     "generatedAt": { "type": "string", "format": "date-time" },
     "status": { "enum": ["passed", "failed"] },
     "gateDecision": { "enum": ["accepted", "not_accepted", "invalid"] },
+    "attentionOutcome": {
+      "enum": ["attention_win", "attention_null", "not_recorded"]
+    },
+    "causalCredit": {
+      "enum": [
+        "packet_changed_moat",
+        "packet_changed_attention",
+        "no_causal_credit",
+        "contaminated",
+        "not_recorded"
+      ]
+    },
     "wedgeOutcome": { "enum": ["wedge_win", "wedge_null", "not_recorded"] },
     "moatOutcome": {
       "enum": [
@@ -98,6 +113,57 @@
         "wedgeSignals": {
           "type": "array",
           "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "reviewSession": {
+      "type": "object",
+      "required": [
+        "status",
+        "attentionOutcome",
+        "causalCredit",
+        "contaminationReasons",
+        "noCreditReasons",
+        "notes"
+      ],
+      "properties": {
+        "status": { "enum": ["usable", "contaminated", "not_recorded"] },
+        "attentionOutcome": {
+          "enum": ["attention_win", "attention_null", "not_recorded"]
+        },
+        "causalCredit": {
+          "enum": [
+            "packet_changed_moat",
+            "packet_changed_attention",
+            "no_causal_credit",
+            "contaminated",
+            "not_recorded"
+          ]
+        },
+        "path": { "type": ["string", "null"] },
+        "inputs": { "type": "object" },
+        "contaminationReasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "noCreditReasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status", "message"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["passed", "failed", "not_recorded"] },
+              "message": { "type": "string" },
+              "evidence": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true

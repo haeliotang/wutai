@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "kind": "wutai.review_session",
+  "subject": {
+    "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "packetId": "packet_example",
+    "taskId": "task_example",
+    "producerAdapter": "externalAgentExample"
+  },
+  "reviewer": {
+    "id": "external-reviewer",
+    "name": "External Reviewer",
+    "role": "maintainer",
+    "source": "github_review"
+  },
+  "arm0": {
+    "wouldLook": true,
+    "statement": "I would review this change even without a Wutai packet."
+  },
+  "armA": {
+    "scopedDecision": "no_action",
+    "sawTargetGap": false,
+    "riskRestatement": "From the diff alone I did not identify the packet's empty-seat issue."
+  },
+  "armB": {
+    "packetViewed": true,
+    "statement": "I viewed the packet before recording the scoped ratification decision."
+  },
+  "controls": {
+    "negativeControlReportedUseful": false,
+    "shamFieldAttributed": false,
+    "packetOnlyRepeatedDiff": false,
+    "traceCompleteEnough": true,
+    "automaticReproducible": true
+  },
+  "notes": "Example only. Replace subject hashes and reviewer fields before use."
+}

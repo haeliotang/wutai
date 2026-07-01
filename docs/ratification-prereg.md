@@ -1,7 +1,8 @@
-# Scoped Ratification Prereg v0.7
+# Scoped Ratification Prereg v0.8
 
 This prereg is intentionally thin. It exists to prevent a future reviewer
-session from turning a review-compression win into a ratification claim.
+session from turning an attention win or review-compression win into a
+ratification claim.
 
 ## Hypothesis
 
@@ -22,7 +23,17 @@ The first run is Wizard-of-Oz unless explicitly proven otherwise: the packet
 may be hand-rendered from a clean trace. Any pass is conditional on the same
 fields later being reproducible automatically from a complete trace.
 
-## Baseline Arm
+## Arm 0: Would-Look Baseline
+
+Before showing the diff or packet, capture:
+
+- Whether the reviewer would look at this PR/change at all.
+- Why they would or would not enter the review scene.
+
+If the reviewer would not have looked, later packet viewing can only count as
+`ATTENTION-win`. It cannot count as packet-caused scoped ratification.
+
+## Arm A: Diff-Only Baseline
 
 Before showing the packet, capture:
 
@@ -34,7 +45,7 @@ If the reviewer already refuses all agent work, or already sees the target
 scope/evidence/empty-seat gap from the diff alone, the packet cannot claim
 causal credit for the refusal.
 
-## Packet Arm
+## Arm B: Packet-Assisted Arm
 
 After showing the packet, capture:
 
@@ -45,6 +56,15 @@ After showing the packet, capture:
 - Did they attribute behavior change to a sham or irrelevant field?
 
 ## Outcome Grid
+
+`ATTENTION-win`
+
+The packet caused the reviewer to enter a review they otherwise would not have
+entered. This is a distribution/attention wedge, not a ratification moat.
+
+`ATTENTION-null`
+
+The reviewer would have looked anyway, or attention was not changed.
 
 `WEDGE-win`
 
@@ -70,6 +90,27 @@ null.
 
 No scoped ratification or scoped refusal occurred.
 
+`CAUSAL-CREDIT: packet_changed_moat`
+
+Only valid when all are true:
+
+- Arm 0 says the reviewer would have looked anyway.
+- Arm A did not produce the same scoped decision.
+- Arm A did not already see the target gap.
+- Arm B produced scoped ratification or scoped refusal.
+- Negative control and sham controls did not fire.
+
+`CAUSAL-CREDIT: packet_changed_attention`
+
+Valid when Arm 0 says the reviewer would not have looked, but Arm B shows they
+viewed the packet. This cannot be upgraded into a moat claim.
+
+`CAUSAL-CREDIT: contaminated`
+
+Use when the negative control is reported useful, the sham field is credited,
+the trace is incomplete enough to hide scope/evidence gaps, or the packet
+fields cannot later be reproduced automatically.
+
 ## Pass Rules
 
 A single positive case is not enough to build product.
@@ -77,11 +118,14 @@ A single positive case is not enough to build product.
 The strongest first-session pass is:
 
 ```text
-negative-control null + real-change MOAT-win
+negative-control null + Arm 0 would-look + Arm A diff-only null + Arm B MOAT-win
 ```
 
 `WEDGE-win + MOAT-null` only licenses review-compression bait. It does not
 license scoped ratification.
+
+`ATTENTION-win + MOAT-win` licenses only attention/distribution value unless a
+separate would-look case also produces packet-caused moat credit.
 
 `THEATER` is worse than null because it shows the act can degrade into a green
 check.

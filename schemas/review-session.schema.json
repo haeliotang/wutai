@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wutai.local/schemas/review-session.schema.json",
+  "title": "Wutai Review Session",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "subject",
+    "reviewer",
+    "arm0",
+    "armA",
+    "armB",
+    "controls"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "wutai.review_session" },
+    "subject": {
+      "type": "object",
+      "required": ["manifestSha256", "packetId", "taskId", "producerAdapter"],
+      "properties": {
+        "manifestSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "packetId": { "type": "string", "minLength": 1 },
+        "taskId": { "type": "string", "minLength": 1 },
+        "producerAdapter": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "reviewer": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "arm0": {
+      "type": "object",
+      "description": "Would-look baseline before showing the diff or packet.",
+      "properties": {
+        "wouldLook": { "type": "boolean" },
+        "statement": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "armA": {
+      "type": "object",
+      "description": "Diff-only baseline before showing the packet.",
+      "properties": {
+        "scopedDecision": {
+          "enum": [
+            "scoped_ratified",
+            "refused_with_scope_reason",
+            "theater_signature",
+            "no_action"
+          ]
+        },
+        "sawTargetGap": { "type": "boolean" },
+        "declaredScope": { "type": "string" },
+        "excludedScope": { "type": "string" },
+        "riskRestatement": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "armB": {
+      "type": "object",
+      "description": "Packet-assisted review arm.",
+      "properties": {
+        "packetViewed": { "type": "boolean" },
+        "statement": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "controls": {
+      "type": "object",
+      "properties": {
+        "negativeControlReportedUseful": { "type": "boolean" },
+        "shamFieldAttributed": { "type": "boolean" },
+        "packetOnlyRepeatedDiff": { "type": "boolean" },
+        "traceCompleteEnough": { "type": "boolean" },
+        "automaticReproducible": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": true
+}

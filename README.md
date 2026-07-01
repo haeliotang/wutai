@@ -11,7 +11,7 @@ touching local files, provider credentials, browser state, source material, or
 durable work products. Wutai's job is to make that work permissioned,
 auditable, stoppable, and reviewable.
 
-> Repository status: v0.7 scoped ratification experiment harness. The current code
+> Repository status: v0.8 review-session instrumentation. The current code
 > implements one supervised research workflow, a v0.2+ work-packet manifest, and a
 > local-script trace-import, coding-agent trace-import, MCP tool-call
 > trace-import, local file ingestion, and developer CLI wrapper wedge. It does
@@ -23,8 +23,10 @@ auditable, stoppable, and reviewable.
 > the original runtime. v0.7 adds a CLI/CI scoped ratification harness that
 > re-verifies a packet, separates review-compression (`wedgeOutcome`) from
 > ratification (`moatOutcome`), requires `declaredScope` and `excludedScope`
-> for acceptance, and marks unscoped ratification as a theater anti-signal. It
-> does not prove reviewer identity, trace completeness, or external demand.
+> for acceptance, and marks unscoped ratification as a theater anti-signal.
+> v0.8 adds an optional `review-session.json` scorer so the harness can
+> distinguish attention credit from packet-caused scoped ratification credit.
+> It does not prove reviewer identity, trace completeness, or external demand.
 
 ## Why This Exists
 
@@ -56,7 +58,9 @@ then call the same local verifier and trust policy gate that Wutai uses. v0.5
 turns those packets into a local inbox for review and retention. v0.7 adds a
 scoped ratification harness for testing whether a second, non-self reviewer
 will sign a declared boundary or refuse because of intent drift, an empty
-accountability seat, or unevidenced claims.
+accountability seat, or unevidenced claims. v0.8 adds review-session
+instrumentation for the preceding question: would the reviewer have looked at
+all, and did the packet causally change the scoped decision?
 
 ```text
 natural-language task
@@ -143,6 +147,12 @@ Implemented:
   `excludedScope` for acceptance, records scoped refusal as a valid moat
   readout but not an acceptance pass, and marks unscoped ratification as a
   theater anti-signal.
+- Review Session Instrumentation v0.8. `wutai attest-packet --review-session
+  <path>` can read a `review-session.json` with Arm 0 would-look baseline, Arm
+  A diff-only baseline, Arm B packet-assisted review, and contamination
+  controls. The output adds `attentionOutcome`, `causalCredit`, and
+  `reviewSession` so an attention win cannot be counted as packet-caused
+  scoped ratification.
 - Example GitHub Actions consumer-attestation gate in
   `.github/workflows/wutai-consumer-attestation.example.yml`.
 - Agent Packet Inbox v0.5. The UI derives a packet inbox from local task
@@ -254,6 +264,12 @@ consumer-attestation.json
 consumer-attestation-check.json
 ```
 
+A v0.8 review-session run may also supply:
+
+```text
+review-session.json
+```
+
 Not implemented:
 
 - Runtime-enforced supervised sessions for arbitrary external agents.
@@ -266,8 +282,9 @@ Not implemented:
   reviewer extraction.
 - Path-level witnessing of external runtimes; current external packet paths
   record declared traces supplied by producers.
-- Proof that non-author users already want to perform scoped ratification; v0.7
-  only provides the harness needed to test that behavior.
+- Proof that non-author users already want to perform scoped ratification; v0.8
+  only provides the harness needed to test attention, causal credit, and scoped
+  ratification behavior.
 - Cross-agent credential broker.
 - Mobile approval companion.
 - Production packaging.
@@ -522,9 +539,12 @@ npm run wutai:verify -- --write-artifacts ./artifacts/cli/<session_id>
 
 ## Scoped Ratification Gate
 
-v0.7 adds a post-hoc harness for the question Wutai most needs to test: did a
-non-author reviewer perform scoped ratification, refuse for a real
-scope/evidence/accountability reason, or merely rubber-stamp the packet?
+v0.8 keeps the v0.7 scoped ratification gate and adds optional review-session
+instrumentation. The gate still asks whether a non-author reviewer performed
+scoped ratification, refused for a real scope/evidence/accountability reason,
+or merely rubber-stamped the packet. The new session scorer asks the prior
+causal question: would the reviewer have looked anyway, and did the packet
+change the scoped decision?
 
 Create or supply a `consumer-attestation.json` that binds to the current
 `manifest.json` SHA-256, packet id, task id, and producer adapter. A ratified
@@ -554,15 +574,47 @@ npm run wutai:attest -- \
   ./artifacts/cli/<session_id>
 ```
 
+To include v0.8 session instrumentation:
+
+```bash
+npm run wutai:attest -- \
+  --review-session ./review-session.json \
+  --disallow-reviewer haeliotang \
+  ./artifacts/cli/<session_id>
+```
+
 The gate re-runs packet verification first. It fails if the packet is blocked,
 if the reviewer is missing or self-disallowed, if the attestation points at a
 stale manifest hash, or if a ratified decision lacks scope boundaries. It
 outputs `wedgeOutcome`, `moatOutcome`, and `experimentCell` so a
 review-compression win cannot be counted as a ratification win. A scoped
 refusal is a valid moat readout but exits non-zero because the work was not
-accepted. This is a ratification experiment harness, not reviewer identity
-proof, runtime supervision, path-level witnessing, or evidence that outside
-users already want to do the review.
+accepted.
+
+When `--review-session` is supplied, the output also includes:
+
+- `attentionOutcome`: `attention_win`, `attention_null`, or `not_recorded`.
+- `causalCredit`: `packet_changed_moat`, `packet_changed_attention`,
+  `no_causal_credit`, `contaminated`, or `not_recorded`.
+- `reviewSession`: recorded inputs, contamination reasons, no-credit reasons,
+  and session notes.
+
+If Arm 0 says the reviewer would not have looked, packet viewing can only earn
+`packet_changed_attention`; it cannot count as packet-caused scoped
+ratification. If Arm A already saw the same gap or produced the same scoped
+decision from the diff alone, the packet gets `no_causal_credit`. If the
+negative control is reported useful, a sham field is credited, trace
+completeness is inadequate, or automatic reproduction is false, the session is
+marked `contaminated`.
+
+Session scoring does not change the original CI acceptance semantics. A scoped
+ratification can still exit `0` while `causalCredit` is `contaminated`; that
+means the work was accepted by the supplied attestation, but the experiment
+cannot claim packet-caused ratification.
+
+This is a ratification experiment harness, not reviewer identity proof,
+runtime supervision, path-level witnessing, automatic GitHub PR metadata
+extraction, or evidence that outside users already want to do the review.
 
 ## External Agent Integration Contract
 

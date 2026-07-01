@@ -93,6 +93,66 @@ async function writeConsumerAttestation(packetDir, overrides = {}) {
   return attestation;
 }
 
+async function writeReviewSession(packetDir, overrides = {}) {
+  const { subject } = await packetSubject(packetDir);
+  const {
+    subject: subjectOverrides = {},
+    reviewer: reviewerOverrides = {},
+    arm0: arm0Overrides = {},
+    armA: armAOverrides = {},
+    armB: armBOverrides = {},
+    controls: controlsOverrides = {},
+    ...topLevelOverrides
+  } = overrides;
+  const reviewSession = {
+    schemaVersion: 1,
+    kind: "wutai.review_session",
+    subject: {
+      ...subject,
+      ...subjectOverrides,
+    },
+    reviewer: {
+      id: "external-reviewer",
+      name: "External Reviewer",
+      role: "maintainer",
+      source: "test",
+      ...reviewerOverrides,
+    },
+    arm0: {
+      wouldLook: true,
+      statement: "I would review this change without a Wutai packet.",
+      ...arm0Overrides,
+    },
+    armA: {
+      scopedDecision: "no_action",
+      sawTargetGap: false,
+      riskRestatement: "The diff alone did not expose the target gap.",
+      ...armAOverrides,
+    },
+    armB: {
+      packetViewed: true,
+      statement: "I viewed the packet before recording the decision.",
+      ...armBOverrides,
+    },
+    controls: {
+      negativeControlReportedUseful: false,
+      shamFieldAttributed: false,
+      packetOnlyRepeatedDiff: false,
+      traceCompleteEnough: true,
+      automaticReproducible: true,
+      ...controlsOverrides,
+    },
+    ...topLevelOverrides,
+  };
+  const reviewSessionPath = join(packetDir, "review-session.json");
+  await writeFile(
+    reviewSessionPath,
+    JSON.stringify(reviewSession, null, 2),
+    "utf8",
+  );
+  return { reviewSession, reviewSessionPath };
+}
+
 function runGate(packetDir, args = [], entrypoint = gatePath) {
   const commandArgs =
     entrypoint === wutaiPath
@@ -127,6 +187,9 @@ test("scoped ratification gate passes a scoped non-self ratification", async () 
   assert.equal(result.status, 0);
   assert.equal(check.status, "passed");
   assert.equal(check.gateDecision, "accepted");
+  assert.equal(check.attentionOutcome, "not_recorded");
+  assert.equal(check.causalCredit, "not_recorded");
+  assert.equal(check.reviewSession.status, "not_recorded");
   assert.equal(check.moatOutcome, "scoped_ratified");
   assert.equal(check.experimentCell, "unclassified");
   assert.equal(check.packet.trustVerdict, "review_required");
@@ -256,6 +319,146 @@ test("scoped ratification gate records scoped refusal as a moat win but not an a
   assert.deepEqual(check.ratification.scopeReasons, [
     "empty_seat",
     "unevidenced_claims",
+  ]);
+});
+
+test("review session records attention credit without claiming moat credit", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-consumer-attention-"));
+  const { packetDir } = await createSdkPacket(outputRoot, {
+    taskId: "consumer_attestation_attention",
+  });
+  await writeConsumerAttestation(packetDir, {
+    wedge: {
+      changedReviewBehavior: true,
+      signals: ["empty_seat"],
+      statement: "The packet made me enter the review surface.",
+    },
+  });
+  const { reviewSessionPath } = await writeReviewSession(packetDir, {
+    arm0: {
+      wouldLook: false,
+      statement: "I would not have reviewed this PR without the packet.",
+    },
+  });
+
+  const { result, check } = runGate(packetDir, [
+    "--review-session",
+    reviewSessionPath,
+    "--disallow-reviewer",
+    "haeliotang",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(check.status, "passed");
+  assert.equal(check.gateDecision, "accepted");
+  assert.equal(check.attentionOutcome, "attention_win");
+  assert.equal(check.causalCredit, "packet_changed_attention");
+  assert.equal(check.reviewSession.status, "usable");
+  assert.equal(check.reviewSession.inputs.wouldLook, false);
+});
+
+test("review session grants moat causal credit only after a would-look diff-only null", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-consumer-moat-credit-"));
+  const { packetDir } = await createSdkPacket(outputRoot, {
+    taskId: "consumer_attestation_moat_credit",
+  });
+  await writeConsumerAttestation(packetDir, {
+    decision: "refused",
+    scopeReasons: ["unevidenced_claims"],
+    declaredScope: "",
+    excludedScope:
+      "I do not sign off on the output claim until the evidence gap is owned.",
+    statement:
+      "I refuse scoped ratification because the packet exposes an unevidenced claim.",
+    wedge: {
+      changedReviewBehavior: false,
+      signals: ["none"],
+      statement: "The packet did not change where I looked.",
+    },
+  });
+  const { reviewSessionPath } = await writeReviewSession(packetDir);
+
+  const { result, check } = runGate(packetDir, [
+    "--review-session",
+    reviewSessionPath,
+    "--disallow-reviewer",
+    "haeliotang",
+  ]);
+
+  assert.equal(result.status, 20);
+  assert.equal(check.gateDecision, "not_accepted");
+  assert.equal(check.attentionOutcome, "attention_null");
+  assert.equal(check.moatOutcome, "refused_with_scope_reason");
+  assert.equal(check.causalCredit, "packet_changed_moat");
+  assert.equal(check.reviewSession.status, "usable");
+  assert.deepEqual(check.reviewSession.noCreditReasons, []);
+});
+
+test("review session denies causal credit when diff-only already saw the same gap", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-consumer-no-credit-"));
+  const { packetDir } = await createSdkPacket(outputRoot, {
+    taskId: "consumer_attestation_no_credit",
+  });
+  await writeConsumerAttestation(packetDir, {
+    decision: "refused",
+    scopeReasons: ["empty_seat"],
+    declaredScope: "",
+    excludedScope: "I do not sign off until the accountable owner is named.",
+    statement:
+      "I refuse scoped ratification because the packet leaves the owner empty.",
+  });
+  const { reviewSessionPath } = await writeReviewSession(packetDir, {
+    armA: {
+      scopedDecision: "refused_with_scope_reason",
+      sawTargetGap: true,
+      riskRestatement: "The diff already showed that the accountable owner was absent.",
+    },
+  });
+
+  const { check } = runGate(packetDir, [
+    "--review-session",
+    reviewSessionPath,
+    "--disallow-reviewer",
+    "haeliotang",
+  ]);
+
+  assert.equal(check.attentionOutcome, "attention_null");
+  assert.equal(check.causalCredit, "no_causal_credit");
+  assert.equal(
+    check.reviewSession.noCreditReasons.includes("diff_only_already_saw_target_gap"),
+    true,
+  );
+  assert.equal(
+    check.reviewSession.noCreditReasons.includes("diff_only_same_scoped_decision"),
+    true,
+  );
+});
+
+test("review session marks negative-control usefulness as contaminated", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "wutai-consumer-contaminated-"));
+  const { packetDir } = await createSdkPacket(outputRoot, {
+    taskId: "consumer_attestation_contaminated",
+  });
+  await writeConsumerAttestation(packetDir);
+  const { reviewSessionPath } = await writeReviewSession(packetDir, {
+    controls: {
+      negativeControlReportedUseful: true,
+    },
+  });
+
+  const { result, check } = runGate(packetDir, [
+    "--review-session",
+    reviewSessionPath,
+    "--disallow-reviewer",
+    "haeliotang",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(check.gateDecision, "accepted");
+  assert.equal(check.reviewSession.status, "contaminated");
+  assert.equal(check.causalCredit, "contaminated");
+  assert.deepEqual(check.reviewSession.contaminationReasons, [
+    "negative_control_reported_useful",
   ]);
 });
 
