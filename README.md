@@ -8,32 +8,30 @@ boundary.
 
 It is designed for the point where an agent stops being a chat answer and starts
 touching local files, provider credentials, browser state, source material, or
-durable work products. Wutai's job is to make that work permissioned,
-auditable, stoppable, and reviewable.
+durable work products. Wutai's job is to make that work verifiable and
+reviewable, and to route every unit of it to an explicit oversight outcome —
+including recording, honestly, when no human looked. Runtime sandboxing and
+permission enforcement remain with agent runtimes and the OS; Wutai is the
+evidence and accountability layer around them.
 
-> Repository status: v0.10 permission-basis typed attention gate. The current code
-> implements one supervised research workflow, a v0.2+ work-packet manifest, and a
-> local-script trace-import, coding-agent trace-import, MCP tool-call
-> trace-import, local file ingestion, and developer CLI wrapper wedge. It does
-> not yet sandbox commands, enforce a general permission broker, or supervise
-> arbitrary external agents, browser-control runtimes, live MCP sessions, live
-> coding agents, or full computer-use sessions. v0.5 adds a local Agent Packet
-> Inbox over the packet contract, so external-agent work can be collected,
-> filtered, explained, retained, or rejected without implying Wutai controlled
-> the original runtime. v0.7 adds a CLI/CI scoped ratification harness that
-> re-verifies a packet, separates review-compression (`wedgeOutcome`) from
-> ratification (`moatOutcome`), requires `declaredScope` and `excludedScope`
-> for acceptance, and marks unscoped ratification as a theater anti-signal.
-> v0.8 adds an optional `review-session.json` scorer so the harness can
-> distinguish attention credit from packet-caused scoped ratification credit.
-> v0.9 adds an attention-decision gate that routes verified packets into
-> `auto_accepted_under_policy`, `human_attention_required`,
-> `scoped_ratified`, or `blocked_or_unowned` while explicitly recording when
-> no scoped human review evidence is present. v0.10 splits permission-granting
-> basis from risk signals: only mechanical allowlists and deterministic external
-> checks can support policy auto acceptance; model-backed external checks,
-> semantic comparisons, and model judgments can only route attention.
-> It does not prove reviewer identity, trace completeness, or external demand.
+> Repository status: v0.10 reference implementation, no external adopters yet.
+> What works today: signed work packets from a developer CLI wrapper, plus
+> local-script / coding-agent / MCP trace import and local file ingestion; a
+> local Agent Packet Inbox; packet verification against a trusted-producer key
+> policy; a scoped-ratification harness that requires `declaredScope` /
+> `excludedScope` and flags unscoped sign-off as a theater anti-signal; and an
+> attention-decision gate that routes every packet to
+> `auto_accepted_under_policy`, `human_attention_required`, `scoped_ratified`,
+> or `blocked_or_unowned` — where only mechanical allowlists and deterministic
+> external checks can grant auto acceptance, and absence of human review is
+> always recorded as `no_human_review`. Per-version history:
+> [docs/development.md](docs/development.md). It does not sandbox commands,
+> supervise live runtimes, or prove reviewer identity, trace completeness, or
+> external demand.
+
+Worked example decisions: [examples/](examples/) · field inventory for
+external readers:
+[docs/underwriting-evidence-inventory.md](docs/underwriting-evidence-inventory.md)
 
 ## Why This Exists
 
