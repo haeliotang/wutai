@@ -13,11 +13,14 @@ targets one narrower situation: a provider or deployer of a high-risk AI system
 uses coding agents during development and wants process evidence for quality
 management, technical documentation, logging, and human oversight.
 
-Timeline caveat: the AI Act implementation timeline is moving. The European
-Commission currently states that the AI Act becomes fully applicable on
-2026-08-02 with exceptions, and that political agreement on simplification sets
-later dates for some high-risk areas and product-integrated systems. Re-check
-current law and guidance before using this externally.
+Timeline caveat (as amended by the Digital Omnibus on AI; Parliament vote
+2026-06-16, Council final approval 2026-06-29): Annex III high-risk
+obligations — the chapter containing Art. 12 record-keeping, Art. 14 human
+oversight, and Art. 17 QMS — apply from 2027-12-02 (fixed date; originally
+2026-08-02). Annex I product-embedded high-risk applies from 2028-08-02.
+Art. 50 transparency remains on 2026-08-02 but does not map to this
+artifact. Dates were amended once already; verify against the Official
+Journal before relying on them externally.
 
 ## Field-Level Map
 
