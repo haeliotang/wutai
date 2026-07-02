@@ -434,6 +434,19 @@ test("attention decision accepts scoped ratification when a current check is pre
   assert.equal(decision.accountability.humanReviewEvidence, "scoped_ratification");
   assert.equal(decision.accountability.scopedRatification.accepted, true);
   assert.equal(decision.accountability.scopedRatification.reviewer.id, "external-reviewer");
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) =>
+        reason.id === "accountable_seat_missing" && reason.severity === "audit",
+    ),
+    true,
+  );
+  assert.equal(
+    decision.attention.reasons.some(
+      (reason) => reason.id === "accountable_seat_required",
+    ),
+    false,
+  );
 });
 
 test("attention decision blocks tampered packets", async () => {

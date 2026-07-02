@@ -100,6 +100,7 @@ tests/
 docs/
   architecture.md                 架构分层
   attention-decision-gate.md      v0.10 permission-basis typed attention gate
+  ai-act-evidence-mapping.md      v0.10 attention-decision evidence mapping for policy-owner conversations
   consumer-attestation-gate.md    v0.8 scoped ratification and review-session gate
   ratification-prereg.md          v0.8 scoped ratification prereg
   agent-packet-inbox.md           v0.5 Agent Packet Inbox

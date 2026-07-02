@@ -528,7 +528,8 @@ function buildReasons({
     policy.requireAccountableSeatForAutoAccept &&
     !accountableSeat &&
     trustVerdict.verdict === "trusted" &&
-    policy.autoAcceptTrusted
+    policy.autoAcceptTrusted &&
+    !scopedRatification.accepted
   ) {
     addReason(
       reasons,

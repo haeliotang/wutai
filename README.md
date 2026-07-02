@@ -346,6 +346,7 @@ Key design documents:
 
 - [Development Guide](docs/development.md)
 - [Attention Decision Gate](docs/attention-decision-gate.md)
+- [AI Act Evidence Mapping](docs/ai-act-evidence-mapping.md)
 - [Scoped Ratification Gate](docs/consumer-attestation-gate.md)
 - [Scoped Ratification Prereg](docs/ratification-prereg.md)
 - [Agent Packet Inbox](docs/agent-packet-inbox.md)
