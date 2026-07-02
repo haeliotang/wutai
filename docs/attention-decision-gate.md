@@ -57,6 +57,12 @@ accountable seat for auto acceptance and no matching seat is configured.
 Missing accountable-seat evidence is still recorded as an audit reason even
 when policy is configured to permit auto acceptance without a seat.
 
+Worked example outputs are committed under `examples/`
+(`attention-decision.auto-accepted.example.json` and
+`attention-decision.blocked-unowned.example.json`); see
+[underwriting-evidence-inventory.md](underwriting-evidence-inventory.md) for
+a consumer-facing field inventory.
+
 ## Permission Basis Typing
 
 v0.10 separates facts that may grant policy auto acceptance from facts that can

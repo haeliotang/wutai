@@ -1,0 +1,116 @@
+{
+    "schemaVersion": 1,
+    "kind": "wutai.attention_decision",
+    "taskId": "cli_mr3eu8lv",
+    "generatedAt": "2026-07-02T11:18:59.916Z",
+    "decision": "blocked_or_unowned",
+    "summary": "Attention decision: blocked or unowned due to accountable_seat_required.",
+    "packet": {
+        "packetId": "cli_mr3eu8lv_work_packet",
+        "packetType": "local_script",
+        "taskId": "cli_mr3eu8lv",
+        "producerAdapter": "wutaiRunCli",
+        "manifestSha256": "3ae69e3a2ee46b16d31e75265a0f42a37f1efe07ddd74eafb1c41fdbc2daf3db",
+        "trustVerdict": "trusted"
+    },
+    "permissionBasis": [
+        {
+            "basisId": "packet_trust_verdict",
+            "label": "Packet trust verdict is trusted.",
+            "evaluationMethod": "mechanical_allowlist",
+            "grantEligible": true,
+            "source": "wutai.verify-packet",
+            "evidence": "verdict=trusted"
+        },
+        {
+            "basisId": "trusted_producer",
+            "label": "Producer key matched trusted-producer policy.",
+            "evaluationMethod": "mechanical_allowlist",
+            "grantEligible": true,
+            "source": "wutai.verify-packet",
+            "evidence": "producer=wutaiRunCli"
+        }
+    ],
+    "riskSignals": [],
+    "attention": {
+        "required": false,
+        "reasons": [
+            {
+                "id": "no_human_review",
+                "severity": "audit",
+                "requiredSeat": "maintainer",
+                "message": "No current scoped human ratification evidence is accepted for this packet.",
+                "evidence": "status=not_recorded"
+            },
+            {
+                "id": "accountable_seat_missing",
+                "severity": "audit",
+                "requiredSeat": "owner",
+                "message": "No matching accountable seat is configured for this packet."
+            },
+            {
+                "id": "accountable_seat_required",
+                "severity": "blocker",
+                "requiredSeat": "owner",
+                "message": "Attention policy requires an accountable seat before auto acceptance."
+            }
+        ]
+    },
+    "accountability": {
+        "accountableSeatStatus": "missing",
+        "accountableSeat": null,
+        "scopedRatification": {
+            "status": "not_recorded",
+            "accepted": false,
+            "stale": false
+        },
+        "humanReviewEvidence": "not_recorded"
+    },
+    "policy": {
+        "policyId": "wutai-default-attention-policy-v0.10",
+        "sourceLabel": "built-in default",
+        "autoAcceptTrusted": true,
+        "requireAccountableSeatForAutoAccept": true,
+        "externalCheckCount": 0
+    },
+    "inputs": {
+        "trustVerdict": "trusted",
+        "trustVerdictPolicyId": "personal-default",
+        "consumerAttestationCheckPath": null,
+        "trustChecks": [
+            {
+                "name": "manifest_contract",
+                "status": "passed"
+            },
+            {
+                "name": "artifact_integrity",
+                "status": "passed"
+            },
+            {
+                "name": "packet_provenance",
+                "status": "passed"
+            },
+            {
+                "name": "trusted_producer_required",
+                "status": "passed"
+            },
+            {
+                "name": "policy_override_review",
+                "status": "passed"
+            },
+            {
+                "name": "policy_decision",
+                "status": "passed"
+            },
+            {
+                "name": "override_rationale",
+                "status": "passed"
+            },
+            {
+                "name": "high_risk_allow",
+                "status": "passed"
+            }
+        ]
+    },
+    "limitation": "This decision routes attention over packet artifacts and local policy. It does not prove silent human review, reviewer identity, trace completeness, or runtime sandboxing."
+}
